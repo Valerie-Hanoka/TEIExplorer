@@ -16,8 +16,6 @@ It will allow to:
 This tool is being developed as part of the OBVIL projects.
 See http://obvil.paris-sorbonne.fr/
 
-For the moment, it is dirty and can't be used.
-
-[[http://blog.chron.com/tubular/files/2014/09/so-what-who-cares.gif?raw=true|alt=Who-cares.jpg]]
+For the moment, it is dirty and can't be used. Who-cares.jpg
 
 ---------------
