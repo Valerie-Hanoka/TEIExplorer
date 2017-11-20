@@ -18,6 +18,6 @@ See http://obvil.paris-sorbonne.fr/
 
 For the moment, it is dirty and can't be used.
 
-![Who-cares.jpg](http://blog.chron.com/tubular/files/2014/09/so-what-who-cares.gif)
+![Who-cares.jpg](http://blog.chron.com/tubular/files/2014/09/so-what-who-cares.gif?raw=true)
 
 ---------------
