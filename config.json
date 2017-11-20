@@ -1,0 +1,16 @@
+{
+    "explanations" :
+    {
+        "corpus": "Directories containing the .tei and .xml corpus files that we wish to compare. Keys to this dictionary will be used as labels for grouping the texts contained in the directory.",
+        "debug_size" : "The debug_size is a way to limit the processing to small samples in order to debug quickly. Set to None if testing on the whole corpus. "
+    },
+    "corpora": {
+        "CORPUS_1": "/path/to/my/first_corpus/*/*.xml",
+        "CORPUS_2": "/path/to/my/second_corpus/*.tei",
+        "another_corpus": "data/corpus/*"
+    },
+    "debug_size": 7
+}
+
+
+
