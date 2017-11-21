@@ -1,7 +1,8 @@
-TEIExplorer: A stupid tool to explore and compare XML/TEI corpus
-=================================================================
+TEIExplorer: An unfinished tool to explore and compare XML/TEI French Litterature Corpora
+========================================================================================
 
 *In development*
+---------------
 
 When exploring a corpus of documents XML/TEI, one may need to
 know what texts are similar, and on what basis.
