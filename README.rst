@@ -17,6 +17,4 @@ It will allow to:
 This tool is being developed as part of the OBVIL projects.
 See http://obvil.paris-sorbonne.fr/
 
-For the moment, it is dirty and can't be used. Who-cares.jpg
-
 ---------------
