@@ -27,7 +27,7 @@ setup(
         'mpld3',
         'jinja2',
         'nltk',
-        'dataset',
+        'sqlalchemy',
         'lxml'
     ],
     setup_requires=['nltk'],

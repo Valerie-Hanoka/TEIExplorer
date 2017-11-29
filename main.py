@@ -39,7 +39,7 @@ import time
 import json
 from optparse import OptionParser
 from teiexplorer.corpusreader import tei_content_scraper as tcscraper
-from teiexplorer.utils.sql_basic import CorpusSQLDB
+from teiexplorer.utils.sqlite_basic import CorpusSQLiteDB
 # import metadataGraph as mdg
 
 
@@ -72,10 +72,10 @@ if __name__ == "__main__":
             corpora = config["corpora"]
 
     # Results will be saved in a SQLite Database
-    db_name = 'UseAndReuse_%s.db' % time.strftime('%b_%d_%Y_%H:%M:%S')
+    db_name = 'UseAndReuse_%s.sqlite' % time.strftime('%b_%d_%Y_%H:%M:%S')
     if options.database:
         db_name = options.database
-    db = CorpusSQLDB(db_name)
+    db = CorpusSQLiteDB(db_name)
 
     if options.parse_tei:
         # Iterating over the listed corpora. The 'corpus_tag' corresponds
@@ -88,7 +88,10 @@ if __name__ == "__main__":
                 test_limit += 1
                 logging.info(u"Parsing %s" % document_file)
                 document = tcscraper.TeiContent(document_file, corpus_tag)
-                db.add_document(document)
+
+                print document.header_metadata
+
+                db.add_xml_document(document)
 
                 #if document.metadata:
                     # corpus.add_metadata(
@@ -100,6 +103,8 @@ if __name__ == "__main__":
                     #     document.content_words
                     # )
                 del document
+
+    db.finalise()
 
     # # save_to_format(corpus.get_metadata_list(), options.output_filename, options.format)
     # corpus.cluster(options.output_filename)

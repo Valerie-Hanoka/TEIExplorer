@@ -1,3 +1,6 @@
+![TEIExplorer](https://github.com/Valerie-Hanoka/TEIExplorer/blob/master/illustration.png)
+
+
 TEIExplorer: A stupid tool to explore and compare XML/TEI corpus
 =================================================================
 
