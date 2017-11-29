@@ -18,8 +18,6 @@ from teiexplorer.utils.lingutils import (
 )
 
 
-
-
 class DocumentContent(object):
 
     logging.basicConfig(
@@ -112,7 +110,7 @@ class TeiContent(DocumentContent):
 
         # Parsing the document header
         self.etree_root = self.etree_xml.getroot()
-        metadata_root = self.etree_root.find(self.namespace + "teiHeader")
+        metadata_root = self.etree_root.find(self.namespace + 'teiHeader')
         self.header_metadata = merge_and_append_dicts(
             self.header_metadata,
             self.__recursive_tag_info_retriever(u'', metadata_root)
@@ -132,8 +130,8 @@ class TeiContent(DocumentContent):
         elements_iterator = element.getchildren()
         element_tag = element.tag.rsplit('}', 1)[-1]
         element_tag = u'' \
-            if element_tag == "teiHeader"\
-            else "%s#%s" % (parent_tag, element_tag)
+            if element_tag == 'teiHeader'\
+            else '%s#%s' % (parent_tag, element_tag)
 
         for child in elements_iterator:
             if child.getchildren():
@@ -144,13 +142,17 @@ class TeiContent(DocumentContent):
             else:
                 if child.text:
                     (normalized_text, normalized_tag) = self.__normalize_metadata(child.text, child.tag)
-                    element_information["%s#%s" % (parent_tag, normalized_tag)] = [normalized_text]
+                    element_information = merge_and_append_dicts(
+                        {'%s#%s' % (parent_tag, normalized_tag): normalized_text}, # N.B: very dirty, but the order
+                        element_information                                        # is important in the parameters
+                    )
                     for attribute_key, attribute_value in child.attrib.items():
                         (normalized_attribute_value, normalized_attribute_key) =\
-                            self.__normalize_metadata(attribute_value, normalized_tag + ":" + attribute_key)
-                        element_information["%s#%s" % (parent_tag, normalized_attribute_key)] =\
-                            [normalized_attribute_value]
-
+                            self.__normalize_metadata(attribute_value, normalized_tag + ':' + attribute_key)
+                        element_information = merge_and_append_dicts(
+                            {'%s#%s' % (parent_tag, normalized_attribute_key): normalized_attribute_value},  # N.B: very dirty, but the order
+                            element_information                                                              # is important in the parameters
+                        )
         return element_information
 
     def __normalize_metadata(self, value, key):
@@ -182,18 +184,8 @@ class TeiContent(DocumentContent):
          and should be redefined in later versions"""
 
         # TODO
-        # accepted_keys = [
-        #     "_file",
-        #     "_tag",
-        #     "author",
-        #     "title",
-        #     "date",
-        #     "_words",
-        #     "_sentences",
-        #     "_chars",
-        #     "_tokens",
-        #     "_sent:polarity",
-        #     "_sent:subjectivity"
+        # accepted_keys = [ "_file", "_tag", "author", "title", "date", "_words",
+        # "_sentences", "_chars", "_tokens", "_sent:polarity", "_sent:subjectivity"
         # ]
 
         unwanted_keys = ['^note$', '^..?$', '^.*at 0x.*$', '^projectDesc.*$']
@@ -223,7 +215,6 @@ class TeiContent(DocumentContent):
          (eg. author, title, date...), and the values are detailed by types
          (parents in the xml as well as the attributes). For instance, the xml:
 
-
          <teiHeader>
             <fileDesc>
                <titleStmt>
@@ -249,15 +240,19 @@ class TeiContent(DocumentContent):
                </sourceDesc>
             </fileDesc>
          </teiHeader>
+
+        should have the following self.header_metadata representation:
+        TODO
+
            """
 
         new_dic = {}
         for (k, v) in self.header_metadata.items():
             if v:
 
-                (xml_parent, _, xml_key_with_optional_attribute) = k.rpartition("#")
+                (xml_parent, _, xml_key_with_optional_attribute) = k.rpartition('#')
                 if ':' in xml_key_with_optional_attribute:
-                    xml_key, _, xml_attribute = xml_key_with_optional_attribute.rpartition(":")
+                    xml_key, _, xml_attribute = xml_key_with_optional_attribute.rpartition(':')
                 else:
                     (xml_key, xml_attribute) = (xml_key_with_optional_attribute, xml_key_with_optional_attribute)
 
@@ -265,26 +260,18 @@ class TeiContent(DocumentContent):
                 same_parent_dict = same_key_dict.get(xml_parent, {})
                 same_attribute_dict = same_parent_dict.get(xml_attribute, {})
 
-
-
                 new_attribute_dict = {xml_attribute: v}
                 new_parent_dict = merge_and_append_dicts(new_attribute_dict, same_attribute_dict)
                 new_key_dict = merge_two_dicts({xml_parent: new_parent_dict}, same_parent_dict)
-                new_dic[xml_key] = merge_two_dicts(same_key_dict, new_key_dict)
 
-                import pprint
+                if new_dic.get(xml_key):
+                    other_key_dict = new_dic[xml_key].get(xml_parent, None)
+                    if other_key_dict:
+                        new_key_dict = merge_two_dicts(other_key_dict, new_key_dict)
+                
+                new_dic[xml_key] = merge_two_dicts(new_key_dict, same_key_dict)
 
-                print xml_key
-                print xml_attribute
-                print xml_parent
-                print v
-                pprint.pprint(new_dic)
-                import ipdb; ipdb.set_trace()
-
-
-
-        import ipdb; ipdb.set_trace()
-        return new_dic
+        self.header_metadata = new_dic
 
 
 

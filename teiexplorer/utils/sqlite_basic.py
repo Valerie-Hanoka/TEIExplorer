@@ -126,6 +126,9 @@ class CorpusSQLiteDB(object):
     def add_xml_document(self, doc):
 
 
+        # TODO
+        doc.header_metadata['author']
+
         # # Adding information to the document Table
         # document_info = {
         #     'id': doc.document_metadata[u'_file'],
