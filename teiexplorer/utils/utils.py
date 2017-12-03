@@ -2,41 +2,45 @@
 # -*- coding: utf-8 -*-
 
 from collections import defaultdict
+from copy import deepcopy
 
 
 def merge_two_dicts(x, y):
     """Given two dicts (with string keys),
-    merge them into a new dict as a shallow copy.
-    x values override y values in cases of duplicate keys.
+    merge them into a new dict as a deep copy.
+    In cases of duplicate keys, values are appended in lists.
     Ex.:
-    >>> x = {'both': 'both_x', 'only_x': 'only_x'}
-    >>> y = {'both': 'both_y', 'only_y': 'only_y'}
-    >>> merge_two_dicts(x, y)
-    >>> {'both': 'both_x', 'only_x': 'only_x', 'only_y': 'only_y'}
-    :param x: First dictionary (master)
-    :param y: Second dictionary (slave)
-    :return: The merge of x and y, keeping x values in case of conflicts."""
-    return dict(y, **x)
-
-def merge_and_append_dicts(*dicts):
-    """
-    Merge a list of dictionaries by appending values with common keys
-    in a list .
-    Ex:
-    >>> x = {'both1':'botha1x', 'both2':'botha2x', 'only_x': 'only_x'  }
-    >>> y = {'both1':'botha1y', 'both2': 'botha2y', 'only_y': 'only_y' }
-    >>> merge_and_append_dicts(x, y)
-    >>> {'both1': ['botha1x', 'botha1y'], 'both2': ['botha2x', 'botha2y'], 'only_x': ['only_x'], 'only_y': ['only_y']}
-    :param dicts: The list of dict to be merged with append function
-    :return: A merged dictionary with append function
-    """
-    merged = {}
-    for d in dicts:
-        for k, v in d.items():
-            if not type(v) is list:
-                v = [v]
-            merged[k] = merged.get(k, [])+v
-    return merged
+    >>> dic_y = {'both': {'both_y_diff' : 'bar', 'both_same': 'same_y'}, 'only_y': 'only_y'}
+    >>> dic_x = {'both': {'both_x_diff' : 'foo', 'both_same': 'same_x'}, 'only_x': {'only_x' : 'baz'}}
+    >>> merge_two_dicts(dic_x, dic_y)
+    >>> {'both': {
+    >>>      'both_same': ['same_x', 'same_y'],
+    >>>      'both_x_diff': 'foo',
+    >>>      'both_y_diff': 'bar'},
+    >>>  'only_x': {'only_x': 'baz'},
+    >>>  'only_y': 'only_y'}
+    :param x: First dictionary
+    :param y: Second dictionary
+    :return: The recursive merge of x and y, appending values in list in case of duplicate keys."""
+    if not isinstance(y, dict):
+        return y
+    result = deepcopy(x)
+    for k, v in y.iteritems():
+        if k in result and isinstance(result[k], dict):
+                result[k] = merge_two_dicts(result[k], v)
+        else:
+            if isinstance(v, dict):
+                result[k] = deepcopy(v)
+            else:
+                v = deepcopy(v)
+                existing_v = deepcopy(result.get(k, []))
+                if existing_v:
+                    v = v if isinstance(v, list) else [v]
+                    existing_v = existing_v if isinstance(existing_v, list) else [existing_v]
+                    result[k] = existing_v+v
+                else:
+                    result[k] = v
+    return result
 
 
 def sum_dicts(*dicts):

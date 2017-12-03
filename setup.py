@@ -28,7 +28,8 @@ setup(
         'jinja2',
         'nltk',
         'sqlalchemy',
-        'lxml'
+        'lxml',
+        'unidecode'
     ],
     setup_requires=['nltk'],
     zip_safe=False)

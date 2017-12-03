@@ -1,35 +1,21 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-sql_basic is part of the project obvil
+lazy_sqlite_basic is part of the project TEIExplorer
 Author: Valérie Hanoka
 
 """
-from functools import wraps
-import sqlalchemy
-from sqlalchemy import (
-    Column,
-    Integer,
-    String,
-    VARCHAR,
-    DATE,
-    ForeignKey,
-    Boolean,
-    MetaData
+
+import logging
+import dataset
+from utils import merge_two_dicts
+from lingutils import (
+    parse_year_date,
+    parse_person
 )
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-
-
-def fixed_batch_commit(func):
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        self._COUNTER += 1
-        func(self, *args, **kwargs)
-        if self._COUNTER % self.batch_size == 0:
-            self.session.commit()
-
-    return wrapper
+from sqlalchemy import (
+    text
+)
 
 
 class CorpusSQLiteDB(object):
@@ -38,232 +24,198 @@ class CorpusSQLiteDB(object):
     the information retrieved from the XML-TEI corpora.
     """
 
-    Base = declarative_base()
+    logging.basicConfig(
+            format='%(asctime)s : %(levelname)s : %(message)s',
+            level=logging.INFO)
+
+
     db = None
-    metadata = None
-    connexion = None
-    session = None
-
-    batch_size = 1
-    _COUNTER = 0
-
-
-    class Document(Base):
-        __tablename__ = "document"
-
-        id = Column(VARCHAR(200), primary_key=True)
-        tag = Column(VARCHAR(100), nullable=False)
-        is_body_parsed = Column(Boolean)
-        publisher = Column(VARCHAR(100))
-        publication_place = Column(VARCHAR(50))
-        editor = Column(VARCHAR(100))
-        url = Column(VARCHAR(100))
-        doc_idno = Column(VARCHAR(200))
-
-        def __init__(self, kwargs):
-            for k, v in kwargs.items():
-                if type(v) is list:
-                    v = None if len(v) == 0 else v.pop()
-                self.__setattr__(k, v)
-
-    class Person(Base):
-        """"""
-        __tablename__ = "person"
-
-        id = Column(Integer, primary_key=True)
-        raw_name = Column(String, nullable=False)
-        first_name = Column(VARCHAR(200))
-        last_name = Column(VARCHAR(200))
-        title = Column(VARCHAR(100))  # E.g. Mister, Doctor, ...
-        birth_year = Column(DATE)
-        death_year = Column(DATE)
-
-    class DocumentHasAuthor(Base):
-        __tablename__ = 'documentHasAuthor'
-
-        id = Column(Integer, primary_key=True)
-        document_id = Column(VARCHAR(200), ForeignKey('document.id'))
-        person_id = Column(Integer, ForeignKey('person.id'))
-
-    class DocumentHasTitle(Base):
-        __tablename__ = 'documentHasTitle'
-
-        id = Column(Integer, primary_key=True)
-        document_id = Column(VARCHAR(200), ForeignKey('document.id'))
-        title = Column(String)
-        title_type = Column(VARCHAR(100))
-
-    class DocumentHasDate(Base):
-        __tablename__ = 'documentHasDate'
-
-        id = Column(Integer, primary_key=True)
-        document_id = Column(VARCHAR(200), ForeignKey('document.id'))
-        date = Column(DATE)
-        date_part_millennium = Column(Integer)
-        date_part_decade = Column(Integer)
-        date_part_year = Column(Integer)
-        date_type = Column(VARCHAR(100))
 
     def __init__(self, db_name):
+        self.db = dataset.connect(u'sqlite:///%s' % db_name)
 
-        self.connexion = sqlalchemy.create_engine(u'sqlite:///%s' % db_name)
-        self.metadata = MetaData(bind=self.connexion, reflect=True)
-        self.Base.metadata.create_all(self.connexion)
-        DBsession = sessionmaker(bind=self.connexion)
-        self.session = DBsession()
+        # Tables
 
-    def finalise(self):
+        self.document_table = self.db.create_table('document',
+                                                   primary_id=u'_file',
+                                                   primary_type=self.db.types.string(200))
 
-        # Commit the last things
-        self.session.commit()
+        self.idno_table = self.db.create_table('identifier')
+        self.document_has_idno_table = self.db.create_table('documentHasIdentifier')
 
-        # Close communication with the database
-        self.session.close()
+        self.date_table = self.db.create_table('date')
+        self.document_has_date_table = self.db.create_table('documentHasDate')
+
+        self.person_table = self.db.create_table('person')
+        self.document_has_author_table = self.db.create_table('documentHasAuthor')
+
+        self.title_table = self.db.create_table('title')
+        self.document_has_title_table = self.db.create_table('documentHasTitle')
 
 
+    def get_ordered_metadata_attributes(self, attribute_dict):
+        """
+        Transforms part of a TEIHeader metadata dictionnary from a DocumentContent
+        into a dictionnary better corresponding to our SQL schema.
 
-    @fixed_batch_commit
+        Example: The dict
+        >>>{u'_#fileDesc#sourceDesc':
+        >>>        {u'idno': [(6, u'-cd n348'),
+        >>>                   (5, u'n348 n349 n352 n353 n354 n355 n356'),
+        >>>                   (4, u'Helvi'),
+        >>>                   (3, u'Helvi')],
+        >>>         u'type': [(6, u'inalf2'),
+        >>>                   (5, u'inalf1'),
+        >>>                   (4, u'shrtcitelimit'),
+        >>>                   (3, u'shrtcite')]}
+        Will be transformed to:
+        >>>{u'_#fileDesc#sourceDesc': {3: {u'idno': u'Helvi', u'type': u'shrtcite'},
+        >>>                            4: {u'idno': u'Helvi', u'type': u'shrtcitelimit'},
+        >>>                            5: {u'idno': u'n348 n349 n352 n353 n354 n355 n356',
+        >>>                                u'type': u'inalf1'},
+        >>>                            6: {u'idno': u'-cd n348', u'type': u'inalf2'}}}
+        :param attribute_dict:
+        :return:
+        """
+        if not attribute_dict:
+            return {}
+        attribute_by_source_list = []
+        d = {}
+        for xml_origin, attr_values_dict in attribute_dict.items():
+            for (attribute, value_list) in attr_values_dict.items():
+                for (counter, value) in value_list:
+                    old_value = d.get(xml_origin, {})
+                    new_value = {counter: {attribute: value}}
+                    d[xml_origin] = merge_two_dicts(old_value, new_value)
+            attribute_by_source_list.append(d)
+        return d
+
+    def _insert_document_row(self, doc):
+        """Add the current document in the document_table"""
+        return self.document_table.insert(doc.document_metadata)
+        # TODO : Body parsing information
+
+
+    def _get_or_create_row(self, row_info, table):
+
+        # Finding if the element already exists in the DB
+        query = u' AND '.join(
+            [u'"%s"="%s"' % (i, row_info[i])
+             for i in row_info.keys()])
+
+        new_row = table.find_one(text(query))
+        new_row_id = new_row.get('id', None) if new_row else table.insert(row_info)
+        return new_row_id
+
+    def _insert_document_item_row(
+            self,
+            item=None,  # the name of the element to put in the tables
+            modifier_function=None, # a function which will modify the item information
+            base_table=None, # item table
+            relational_table=None,  # DocumentHasItem table
+            doc_info=None, # Document information
+            doc_id=None # Document id in the document_table
+    ):
+        """Add the current document's item in the following tables:
+            - item_table
+            - documentHasItem_table"""
+
+        if not (item
+                and base_table is not None
+                and relational_table is not None
+                and doc_info
+                and doc_id):
+            raise ValueError("""
+            Missing argument for function  _insert_document_item_row:
+                item = %s,
+                base_table = %s
+                relational_table = %s
+                doc_info = %s
+                doc_id = %s """ %(
+                item,
+                base_table,
+                relational_table,
+                doc_info,
+                doc_id
+            )
+                             )
+        item_info = self.get_ordered_metadata_attributes(doc_info.header_metadata.get(item))
+        for (from_xml_element, rows) in item_info.items():
+            for row_number, row_info in rows.items():
+                if modifier_function:
+                    row_info = modifier_function(row_info)
+
+                new_row_id = self._get_or_create_row(row_info, base_table)
+
+                doc_has_item_info = {
+                    'document_id': doc_id,
+                    '%s_id' % item: new_row_id,
+                    'from_xml_element': from_xml_element
+                }
+                self._get_or_create_row(doc_has_item_info, relational_table)
+
     def add_xml_document(self, doc):
+        """Saves a DocumentContent() in a SQLite database."""
+        logging.info("Saving document %s in the database." % doc.document_metadata.get(u'_file'))
+
+        # --- DOCUMENT ---- #
+        document_id = self._insert_document_row(doc)
+
+        # --- IDENTIFIER ---- #
+        def add_url_type(row_info):
+            idno = row_info.get(u'idno')
+            if u'http://' in idno:
+                row_info[u'type'] = u'url'
+            return row_info
+
+        self._insert_document_item_row(
+            item=u'idno',
+            modifier_function=add_url_type,
+            base_table=self.idno_table,
+            relational_table=self.document_has_idno_table,
+            doc_info=doc,
+            doc_id=document_id
+        )
 
 
-        # TODO
-        doc.header_metadata['author']
+        # --- DOCUMENT DATE --- #
+        def normalise_date_information(row_info):
 
-        # # Adding information to the document Table
-        # document_info = {
-        #     'id': doc.document_metadata[u'_file'],
-        #     'tag': doc.document_metadata[u'_tag'],
-        #     'is_body_parsed': doc.document_metadata[u'_body_parsed'],
-        #     'publisher': doc.header_metadata.get(u'publisher', None),
-        #     'publication_place': doc.header_metadata.get(u'pubPlace', None),
-        #     'editor': doc.header_metadata.get(u'editor', None),
-        #     'url': doc.header_metadata.get(u'url', None),
-        #     'doc_idno': doc.header_metadata.get(u'idno', None)
-        # }
-        # new_document = self.Document(document_info)
-        # self.session.add(new_document)
+            edited_date = row_info.get(u'when', None)  # corresponds to the cleanest date information we could use
+            date = edited_date if edited_date else row_info.get(u'date', None)
 
-        # Title information
+            parsed_info_dict = parse_year_date(date)
+            row_info.update(parsed_info_dict)
+            return row_info
 
+        self._insert_document_item_row(
+            item=u'date',
+            modifier_function=normalise_date_information,
+            base_table=self.date_table,
+            relational_table=self.document_has_date_table,
+            doc_info=doc,
+            doc_id=document_id
+        )
 
+        # --- DOCUMENT AUTHORS --- #
+        def normalise_author_information(row_info):
+            row_info.update(parse_person(row_info['author']))
+            return row_info
 
-        # filedesc_title_info = {
-        #     'xml_parent': u'fileDesc',
-        #     'title': doc.document_metadata.get(u'fileDesc:title'),
-        #     'type': doc.document_metadata.get(u'title:type'),
-        #     'level': doc.document_metadata.get(u'fileDesc:title:level')
-        # }
-        #
-        # sourcedesc_title_info = {
-        #     'xml_parent': u'sourceDesc',
-        #     'title': doc.document_metadata.get(u'sourceDesc:title'),
-        #     'type': doc.document_metadata.get(u'sourceDesc:title:type'),
-        #     'level': doc.document_metadata.get(u'sourceDesc:title:level')
-        # }
-        #
-        # # Adding authors
-        # filedesc_author_info = {
-        #     'xml_parent': u'fileDesc',
-        #     'author': doc.document_metadata.get(u'fileDesc:author'),
-        #     'key': doc.document_metadata.get(u'fileDesc:author:key'),
-        #     'role': doc.document_metadata.get(u'fileDesc:author:role'),
-        #     'type': doc.document_metadata.get(u'fileDesc:author:type'),
-        # }
-        #
-        # sourcedesc_author_info = {
-        #     'xml_parent': u'fileDesc',
-        #     'author': doc.document_metadata.get(u'sourceDesc:author'),
-        #     'key': doc.document_metadata.get(u'sourceDesc:author:key'),
-        #     'role': doc.document_metadata.get(u'sourceDesc:author:role'),
-        #     'type': doc.document_metadata.get(u'sourceDesc:author:type'),
-        # }
+        self._insert_document_item_row(
+            item=u'author',
+            modifier_function=normalise_author_information,
+            base_table=self.person_table,
+            relational_table=self.document_has_author_table,
+            doc_info=doc,
+            doc_id=document_id
+        )
 
-
-        #doc_authors = doc.header_metadata[u'author']  # [u'Diderot, Denis, 1713-1784.'],
-        #new_author = self.Person(name='new person')
-
-        # Adding Titles
-        #doc_title = doc.header_metadata[u'title']  # [u'titre recueuil', u'Les Amours', u'[Les] Amours']
-
-
-        # Adding dates
-        #doc_date = doc.header_metadata[u'date'] #: [u'20#06', u'15#52', u'19#98', u'15#52'],
-
-
-
-        print self._COUNTER
-
-
-
-
-    def _add_document(self, metadata, body_metrics):
-
-        line = {}
-        for k, v in metadata.iteritems():
-            if k == '_file':
-                line['location'] = v
-            elif k == 'title' or k == 'editor':
-                line[k] = v
-            else:
-                print "WARNING (ignored): %s:%s " % (k,v)
-            i = self.document.insert()
-
-            # Column('book', Integer, ForeignKey('book.id')),
-            # Column('datePublished', Integer, ForeignKey('date.id'))
-
-
-    # def _add_authors(self, author_info):
-    #     return authors_keys
-    #
-    # def _add_book(self, document):
-    #     return book_key
-
-
-    # def _create_tables(self):
-    #
-    #     self.document = Table(
-    #         'document', self.metadata,
-    #         Column('location', String, primary_key=True),
-    #         Column('title', String),
-    #         Column('editor', VARCHAR(100)),
-    #         Column('book', Integer, ForeignKey('book.id')),
-    #         Column('datePublished', DATE)  # TODO , ForeignKey('date.id')
-    #     )
-    #
-    #     self.book = Table(
-    #         'book', self.metadata,
-    #         Column('book_id', Integer, primary_key=True),
-    #         Column('title', String, nullable=False),
-    #         Column('url', VARCHAR(100))
-    #     )
-    #
-    #     self.person = Table(
-    #         'person', self.metadata,
-    #         Column('person_id', Integer, primary_key=True),
-    #         Column('raw_name', String, nullable=False),
-    #         Column('first_name',  VARCHAR(100)),
-    #         Column('last_name',  VARCHAR(100)),
-    #         Column('title',  VARCHAR(100)),  # E.g. Mister, Doctor, Father...
-    #         Column('birth_year', DATE),
-    #         Column('death_year', DATE),
-    #     )
-    #
-    #     self.book_has_author = Table(
-    #         'book_has_author', self.metadata,
-    #         Column('id', Integer, primary_key=True),
-    #         Column('book_id', Integer, ForeignKey("book.book_id"), nullable=False),
-    #         Column('person_id', Integer, ForeignKey("person.person_id"), nullable=False)
-    #     )
-    #
-    #     self.document_is_book = Table(
-    #         'book_has_author', self.metadata,
-    #         Column('id', Integer, primary_key=True),
-    #         Column('document_id', Integer, ForeignKey("person.person_id"), nullable=False),
-    #         Column('book_id', Integer, ForeignKey("book.book_id"), nullable=False),
-    #         Column('type_of_subsumption', Enum('whole', 'part', 'unkwn'))
-    #     )
-    #
-    #     self.metadata.create_all(self.connexion)
-
-
-
+        # --- DOCUMENT TITLE --- #
+        self._insert_document_item_row(
+            item=u'title',
+            base_table=self.title_table,
+            relational_table=self.document_has_title_table,
+            doc_info=doc,
+            doc_id=document_id
+        )

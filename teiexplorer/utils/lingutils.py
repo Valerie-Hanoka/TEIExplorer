@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import re
-
+import unidecode
 
 # ---- Crappy Termhood Approximation ---- #
 
@@ -18,26 +18,69 @@ def is_content_word(word):
                 return True
     return False
 
+# ----  Person  ---- #
+PERSON_RE = re.compile('(?P<last_name>^[^,(0-9]*),?\s*'
+                       '(?P<first_name_or_initials>[^(,]*)[^0-9]*'
+                       '(?P<birth>[0-9][0-9][0-9\.][0-9\.])?[^0-9]*'
+                       '(?P<death>[0-9][0-9][0-9\.][0-9\.])?')
 
-# ----  Dates  ---- #
-DATE_RE = re.compile('(?P<d1>[A-Za-z,\- ]*)(?P<M>-?[0-9][0-9])(?P<Y>..)(?P<d2>[A-Za-z,\- ]*)')
+def parse_person(value):
+    """ Parse a person information
+    :param value:
+    :return:
+    """
+    match = re.search(PERSON_RE, value)
+    parsed = {}
+    if match:
+        parsed = match.groupdict()
+
+        # Computing the author "fingerprint" which will be used to reconcile the authors
+        first_name = parsed.get('first_name_or_initials', u'')
+        first_letter = first_name[0] if len(first_name) > 0 else u''
+        print first_letter
+        parsed['fingerprint'] = unicode(
+            filter(str.isalpha, str.lower(
+                unidecode.unidecode(parsed.get('last_name', u'')+first_letter))))
+        print parsed['fingerprint']
+    return parsed
 
 
-def normalise_date(value):
-    """ Transforms a date in a string of the form millennium#year
-    TODO: Before JC
+
+# ----  Date  ---- #
+DATE_RE = re.compile(
+    '(?P<raw_before>[A-Za-z,\- ]*)'
+    '(?P<millennium>-?[0-9])'
+    '(?P<century>[0-9])'
+    '(?P<decade>.)'
+    '(?P<year>.)'
+    '(?P<raw_after>[A-Za-z,\- ]*)')
+
+IS_NUM = re.compile('[0-9]')
+
+
+def parse_year_date(value):
+    """ Parse a year date
     :param value: A year date
-    :return: A string date which is split 'millennium#year'
+    :return: A dictionary with millennium, century, decade, year of the date identified. -1 means no info
     """
     match = re.search(DATE_RE, value)
+    parsed = {}
     if match:
-        millennium = match.groupdict().get("M")
-        years = match.groupdict().get("Y")
-        # m1, m2 = (match.groupdict().get("d1"), match.groupdict().get("d2"))
-        # value = "%s # %s # %s # %s " % (millennium, years, m1, m2)
-        return "%s#%s" % (millennium, years)
+        for k, v in match.groupdict().items():
+            if k.startswith('raw_'):
+                if v:
+                    parsed[k] = v
+            else:
+                parsed[k] = int(v) if re.match(IS_NUM, v) else -1
+        if parsed['decade'] >= 0 and parsed['year'] >= 0:
+            parsed['deduced_date'] = int(
+                '%i%i%i%i' %(parsed['millennium'],
+                             parsed['century'],
+                             parsed['decade'],
+                             parsed['year']))
+    return parsed
 
-# French only atm #TODO: allow other languages
+# French only atm - TODO: allow other languages
 stoplist = [
     u'ai',
     u'aie',
