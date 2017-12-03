@@ -9,14 +9,15 @@ from nltk.stem.snowball import SnowballStemmer
 from textblob import TextBlob
 
 from teiexplorer.utils.utils import (
-    merge_and_append_dicts,
     merge_two_dicts
 )
 from teiexplorer.utils.lingutils import (
-    normalise_date,
+    parse_year_date,
     is_content_word
 )
 
+# Debug
+import pprint
 
 class DocumentContent(object):
 
@@ -58,9 +59,15 @@ class DocumentContent(object):
 
 class TeiContent(DocumentContent):
 
+    logging.basicConfig(
+            format='%(asctime)s : %(levelname)s : %(message)s',
+            level=logging.INFO)
+
     namespace = ''
     etree_xml = None
     etree_root = None
+
+    _ATTR_CMPT = 0
 
     def __init__(self, document_filepath, corpus_tag, stemming=True, *args, **kwargs):
         """
@@ -95,7 +102,7 @@ class TeiContent(DocumentContent):
             self.etree_xml = etree.parse(self.filePath, parser=utf8_parser)
             self.namespace = '{' + self.etree_xml.xpath('namespace-uri(.)') + '}'
         except etree.XMLSyntaxError:
-            logging.warning("Ignoring file %s" % self.filePath)
+            logging.warning(u"Ignoring file %s" % self.filePath)
 
     ######################
     #      HEADERS
@@ -110,8 +117,8 @@ class TeiContent(DocumentContent):
 
         # Parsing the document header
         self.etree_root = self.etree_xml.getroot()
-        metadata_root = self.etree_root.find(self.namespace + 'teiHeader')
-        self.header_metadata = merge_and_append_dicts(
+        metadata_root = self.etree_root.find(self.namespace + u'teiHeader')
+        self.header_metadata = merge_two_dicts(
             self.header_metadata,
             self.__recursive_tag_info_retriever(u'', metadata_root)
         )
@@ -129,30 +136,35 @@ class TeiContent(DocumentContent):
         element_information = {}
         elements_iterator = element.getchildren()
         element_tag = element.tag.rsplit('}', 1)[-1]
-        element_tag = u'' \
-            if element_tag == 'teiHeader'\
-            else '%s#%s' % (parent_tag, element_tag)
+        element_tag = u'_' \
+            if element_tag == u'teiHeader'\
+            else u'%s#%s' % (parent_tag, element_tag)
+
+        self._ATTR_CMPT = 0
 
         for child in elements_iterator:
             if child.getchildren():
-                element_information = merge_and_append_dicts(
+                element_information = merge_two_dicts(
                     self.__recursive_tag_info_retriever(element_tag, child),
                     element_information
                 )
             else:
                 if child.text:
+                    # TODO fix this issue with key attr/key val
+
                     (normalized_text, normalized_tag) = self.__normalize_metadata(child.text, child.tag)
-                    element_information = merge_and_append_dicts(
-                        {'%s#%s' % (parent_tag, normalized_tag): normalized_text}, # N.B: very dirty, but the order
-                        element_information                                        # is important in the parameters
+                    element_information = merge_two_dicts(
+                        {u'%s#%s' % (element_tag, normalized_tag): (self._ATTR_CMPT, normalized_text)},  # N.B: very dirty, but the order
+                        element_information                                          # is important in the parameters
                     )
                     for attribute_key, attribute_value in child.attrib.items():
                         (normalized_attribute_value, normalized_attribute_key) =\
                             self.__normalize_metadata(attribute_value, normalized_tag + ':' + attribute_key)
-                        element_information = merge_and_append_dicts(
-                            {'%s#%s' % (parent_tag, normalized_attribute_key): normalized_attribute_value},  # N.B: very dirty, but the order
-                            element_information                                                              # is important in the parameters
+                        element_information = merge_two_dicts(
+                            {u'%s#%s' % (element_tag, normalized_attribute_key): (self._ATTR_CMPT, normalized_attribute_value)},
+                            element_information              # here too, the order is important in the parameters
                         )
+                    self._ATTR_CMPT += 1
         return element_information
 
     def __normalize_metadata(self, value, key):
@@ -170,11 +182,7 @@ class TeiContent(DocumentContent):
             key = key[len(self.namespace):]
 
         # Removing multiple spaces, newlines, carriage returns, tabs...
-            value = ' '.join(value.split())
-
-        # Dates
-        if u'date' in key:
-            value = normalise_date(value)
+            value = u' '.join(value.split())
 
         return value, key
 
@@ -191,12 +199,14 @@ class TeiContent(DocumentContent):
         unwanted_keys = ['^note$', '^..?$', '^.*at 0x.*$', '^projectDesc.*$']
         unwanted_values = ['^$', '^CONVERT-TARGET:.*$', 'ARTFL Frantext']
 
-        unwanted_keys_re = re.compile('|'.join('(?:%s)' % p for p in unwanted_keys))
-        unwanted_values_re = re.compile('|'.join('(?:%s)' % p for p in unwanted_values))
+        unwanted_keys_re = re.compile(u'|'.join('(?:%s)' % p for p in unwanted_keys))
+        unwanted_values_re = re.compile(u'|'.join('(?:%s)' % p for p in unwanted_values))
 
         # Removing unwanted_values
         for k, values in self.header_metadata.items():
-            kept_values = [v for v in values if not unwanted_values_re.match(v)]
+            if not isinstance(values, list):
+                values = [values]
+            kept_values = [(c, v) for (c, v) in values if v and not unwanted_values_re.match(v)]
             self.header_metadata[k] = kept_values
 
         # Removing unwanted keys
@@ -242,36 +252,44 @@ class TeiContent(DocumentContent):
          </teiHeader>
 
         should have the following self.header_metadata representation:
-        TODO
+        {
+            u'author': {u'#fileDesc': {u'author': [u'Pellisson-Fontanier, Paul (1624-1693)',
+                                                   u"Olivet, Pierre-Joseph d' (1682-1768)"]},
+            u'key': [u'12180933', u'11918095'],
+            u'role': [u'Auteur du texte', u'Auteur du texte']},
+            u'date': {u'#fileDesc#sourceDesc': {u'date': [u'17#29']},
+                                                u'when': [u'17#29']},
+            u'idno': {u'#fileDesc':
+                            {u'idno': [u'cb32496228k']},
+                      u'#fileDesc#sourceDesc':
+                            {u'idno': [u'http://gallica.bnf.fr/ark:/12148/bpt6k96039981']}},
+            u'publisher': {u'#fileDesc': {u'publisher': [u'TGB (BnF \u2013 OBVIL)']},
+            u'#fileDesc#sourceDesc': {u'publisher': [u'Jean-Baptiste Coignard fils']}},
+            u'title': {u'#fileDesc': {u'title': [u'Tome 1',
+                                                 u"Histoire de l'Academie fran\xe7oise ...",
+                                                 u"Histoire de l'Academie fran\xe7oise ..."]},
+            u'level': [u'a', u's']}
+        }
 
-           """
+        """
+
+
+
 
         new_dic = {}
         for (k, v) in self.header_metadata.items():
             if v:
-
                 (xml_parent, _, xml_key_with_optional_attribute) = k.rpartition('#')
                 if ':' in xml_key_with_optional_attribute:
                     xml_key, _, xml_attribute = xml_key_with_optional_attribute.rpartition(':')
                 else:
                     (xml_key, xml_attribute) = (xml_key_with_optional_attribute, xml_key_with_optional_attribute)
 
-                same_key_dict = new_dic.get(xml_key, {})
-                same_parent_dict = same_key_dict.get(xml_parent, {})
-                same_attribute_dict = same_parent_dict.get(xml_attribute, {})
-
-                new_attribute_dict = {xml_attribute: v}
-                new_parent_dict = merge_and_append_dicts(new_attribute_dict, same_attribute_dict)
-                new_key_dict = merge_two_dicts({xml_parent: new_parent_dict}, same_parent_dict)
-
-                if new_dic.get(xml_key):
-                    other_key_dict = new_dic[xml_key].get(xml_parent, None)
-                    if other_key_dict:
-                        new_key_dict = merge_two_dicts(other_key_dict, new_key_dict)
-                
-                new_dic[xml_key] = merge_two_dicts(new_key_dict, same_key_dict)
+                current_attribute_dict = {xml_key: {xml_parent: {xml_attribute: v}}}
+                new_dic = merge_two_dicts(new_dic, current_attribute_dict)
 
         self.header_metadata = new_dic
+
 
 
 
@@ -290,10 +308,11 @@ class TeiContent(DocumentContent):
 
         tag = ".//%sbody" % self.namespace
         bodies = self.etree_xml.find(tag)
-        if bodies is None:
-            logging.warning("File %s body is ill-formed. Not Parsing it." % self.filePath)
+        if bodies is None or not bodies.keys(): # TODO not parsed at all
             self.document_metadata[u'_body_parsed'] = False
+            logging.warning("File %s body is ill-formed. Not Parsing it." % self.filePath)
             return
+
         for body in bodies:
             text_pieces = [t for t in body.itertext()]
             self.blob = TextBlob(' '.join(text_pieces))
