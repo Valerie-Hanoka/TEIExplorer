@@ -8,16 +8,9 @@ from lxml import etree
 from nltk.stem.snowball import SnowballStemmer
 from textblob import TextBlob
 
-from teiexplorer.utils.utils import (
-    merge_two_dicts
-)
-from teiexplorer.utils.lingutils import (
-    parse_year_date,
-    is_content_word
-)
+from teiexplorer.utils.utils import merge_two_dicts
+from teiexplorer.utils.lingutils import is_content_word
 
-# Debug
-import pprint
 
 class DocumentContent(object):
 
@@ -97,6 +90,7 @@ class TeiContent(DocumentContent):
             encoding='utf-8',
             # load_dtd=True,
             recover=True)
+        self._ATTR_CMPT = 0
 
         try:
             self.etree_xml = etree.parse(self.filePath, parser=utf8_parser)
@@ -140,8 +134,6 @@ class TeiContent(DocumentContent):
             if element_tag == u'teiHeader'\
             else u'%s#%s' % (parent_tag, element_tag)
 
-        self._ATTR_CMPT = 0
-
         for child in elements_iterator:
             if child.getchildren():
                 element_information = merge_two_dicts(
@@ -150,19 +142,19 @@ class TeiContent(DocumentContent):
                 )
             else:
                 if child.text:
-                    # TODO fix this issue with key attr/key val
-
                     (normalized_text, normalized_tag) = self.__normalize_metadata(child.text, child.tag)
                     element_information = merge_two_dicts(
-                        {u'%s#%s' % (element_tag, normalized_tag): (self._ATTR_CMPT, normalized_text)},  # N.B: very dirty, but the order
-                        element_information                                          # is important in the parameters
+                        {u'%s#%s' % (element_tag, normalized_tag):
+                             (self._ATTR_CMPT, normalized_text)},
+                        element_information
                     )
                     for attribute_key, attribute_value in child.attrib.items():
                         (normalized_attribute_value, normalized_attribute_key) =\
                             self.__normalize_metadata(attribute_value, normalized_tag + ':' + attribute_key)
                         element_information = merge_two_dicts(
-                            {u'%s#%s' % (element_tag, normalized_attribute_key): (self._ATTR_CMPT, normalized_attribute_value)},
-                            element_information              # here too, the order is important in the parameters
+                            {u'%s#%s' % (element_tag, normalized_attribute_key):
+                                 (self._ATTR_CMPT, normalized_attribute_value)},
+                            element_information
                         )
                     self._ATTR_CMPT += 1
         return element_information
@@ -212,7 +204,7 @@ class TeiContent(DocumentContent):
         # Removing unwanted keys
         matched_unwanted_keys = [
             k for k, v in self.header_metadata.items()
-            if unwanted_keys_re.match(k) or len(values) == 0]
+            if unwanted_keys_re.match(k) or len(v) == 0]
 
         for k in matched_unwanted_keys:
             del self.header_metadata[k]
@@ -272,9 +264,6 @@ class TeiContent(DocumentContent):
         }
 
         """
-
-
-
 
         new_dic = {}
         for (k, v) in self.header_metadata.items():
@@ -363,6 +352,3 @@ class TeiContent(DocumentContent):
                     for w in self.blob.tokens
                     if is_content_word(w)
                 ]
-
-
-
