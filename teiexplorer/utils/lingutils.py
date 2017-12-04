@@ -37,11 +37,9 @@ def parse_person(value):
         # Computing the author "fingerprint" which will be used to reconcile the authors
         first_name = parsed.get('first_name_or_initials', u'')
         first_letter = first_name[0] if len(first_name) > 0 else u''
-        print first_letter
         parsed['fingerprint'] = unicode(
             filter(str.isalpha, str.lower(
                 unidecode.unidecode(parsed.get('last_name', u'')+first_letter))))
-        print parsed['fingerprint']
     return parsed
 
 
