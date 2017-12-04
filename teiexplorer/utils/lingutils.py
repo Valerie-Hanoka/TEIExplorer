@@ -3,8 +3,8 @@
 import re
 import unidecode
 
-# ---- Crappy Termhood Approximation ---- #
 
+# ---- Crappy Termhood Approximation ---- #
 def is_content_word(word):
     """
     A baseline function for approximating if a word
@@ -18,11 +18,13 @@ def is_content_word(word):
                 return True
     return False
 
+
 # ----  Person  ---- #
 PERSON_RE = re.compile('(?P<last_name>^[^,(0-9]*),?\s*'
                        '(?P<first_name_or_initials>[^(,]*)[^0-9]*'
                        '(?P<birth>[0-9][0-9][0-9\.][0-9\.])?[^0-9]*'
                        '(?P<death>[0-9][0-9][0-9\.][0-9\.])?')
+
 
 def parse_person(value):
     """ Parse a person information
@@ -41,7 +43,6 @@ def parse_person(value):
             filter(str.isalpha, str.lower(
                 unidecode.unidecode(parsed.get('last_name', u'')+first_letter))))
     return parsed
-
 
 
 # ----  Date  ---- #
@@ -77,6 +78,7 @@ def parse_year_date(value):
                              parsed['decade'],
                              parsed['year']))
     return parsed
+
 
 # French only atm - TODO: allow other languages
 stoplist = [

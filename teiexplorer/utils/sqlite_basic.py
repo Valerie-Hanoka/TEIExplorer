@@ -13,9 +13,8 @@ from lingutils import (
     parse_year_date,
     parse_person
 )
-from sqlalchemy import (
-    text
-)
+from sqlalchemy import text
+from copy import deepcopy
 
 
 class CorpusSQLiteDB(object):
@@ -27,7 +26,6 @@ class CorpusSQLiteDB(object):
     logging.basicConfig(
             format='%(asctime)s : %(levelname)s : %(message)s',
             level=logging.INFO)
-
 
     db = None
 
@@ -52,10 +50,9 @@ class CorpusSQLiteDB(object):
         self.title_table = self.db.create_table('title')
         self.document_has_title_table = self.db.create_table('documentHasTitle')
 
-
     def get_ordered_metadata_attributes(self, attribute_dict):
         """
-        Transforms part of a TEIHeader metadata dictionnary from a DocumentContent
+        Transforms part of a TEIHeader metadata dictionary from a DocumentContent
         into a dictionnary better corresponding to our SQL schema.
 
         Example: The dict
@@ -134,14 +131,16 @@ class CorpusSQLiteDB(object):
                 base_table = %s
                 relational_table = %s
                 doc_info = %s
-                doc_id = %s """ %(
-                item,
-                base_table,
-                relational_table,
-                doc_info,
-                doc_id
-            )
+                doc_id = %s """ %
+                             (
+                                item,
+                                base_table,
+                                relational_table,
+                                doc_info,
+                                doc_id
                              )
+                             )
+
         item_info = self.get_ordered_metadata_attributes(doc_info.header_metadata.get(item))
         for (from_xml_element, rows) in item_info.items():
             for row_number, row_info in rows.items():
@@ -180,7 +179,6 @@ class CorpusSQLiteDB(object):
             doc_id=document_id
         )
 
-
         # --- DOCUMENT DATE --- #
         def normalise_date_information(row_info):
 
@@ -202,8 +200,20 @@ class CorpusSQLiteDB(object):
 
         # --- DOCUMENT AUTHORS --- #
         def normalise_author_information(row_info):
-            row_info.update(parse_person(row_info['author']))
-            return row_info
+            authors = row_info['author']
+            if isinstance(authors, unicode):
+                row_info.update(parse_person(row_info['author']))
+                return row_info
+            elif isinstance(authors, list):
+                authors_info = []
+                row_info.pop('author')
+                # pop author
+                for author in authors:
+                    author_row_info = deepcopy(row_info)
+                    author_row_info.update(parse_person(author))
+                    author_row_info['author'] = author
+                    authors_info.append(author_row_info)
+                return authors_info
 
         self._insert_document_item_row(
             item=u'author',
