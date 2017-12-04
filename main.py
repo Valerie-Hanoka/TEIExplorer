@@ -68,7 +68,7 @@ if __name__ == "__main__":
     if options.config_file:
         with open(options.config_file) as jsonfile:
             config = json.load(jsonfile)
-            debug_size = config["debug_size"] or None
+            debug_size = config.get("debug_size", None)
             corpora = config["corpora"]
 
     # Results will be saved in a SQLite Database
