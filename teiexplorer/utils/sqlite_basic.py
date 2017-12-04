@@ -100,7 +100,7 @@ class CorpusSQLiteDB(object):
 
         # Finding if the element already exists in the DB
         query = u' AND '.join(
-            [u'"%s"="%s"' % (i, row_info[i])
+            [u"'%s'='%s'" % (i, row_info[i])
              for i in row_info.keys()])
 
         new_row = table.find_one(text(query))
