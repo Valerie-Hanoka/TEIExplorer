@@ -39,7 +39,7 @@ import time
 import json
 from optparse import OptionParser
 from teiexplorer.corpusreader import tei_content_scraper as tcscraper
-from teiexplorer.utils.lazy_sqlite_basic import CorpusSQLiteDB
+from teiexplorer.utils.sqlite_basic import CorpusSQLiteDB
 # import metadataGraph as mdg
 
 
@@ -88,9 +88,6 @@ if __name__ == "__main__":
                 test_limit += 1
                 logging.info(u"Parsing %s" % document_file)
                 document = tcscraper.TeiContent(document_file, corpus_tag)
-
-                #print document.header_metadata
-
                 db.add_xml_document(document)
 
                 #if document.metadata:
