@@ -3,7 +3,7 @@
 
 from collections import defaultdict
 from copy import deepcopy
-
+import re
 
 def merge_two_dicts(x, y):
     """Given two dicts (with string keys),
@@ -61,3 +61,19 @@ def sum_dicts(*dicts):
     return dict(summed)
 
 
+COLON_NOT_FOLLOWED_BY_SPACE_RE = re.compile(':([^\s])')
+
+
+def prepare_sql_text(text):
+    """
+    TODO: change this quickfix into a documented version of it
+    Some characters of a query may raise issues when used in SQL queries.
+    This function transforms the query text in a text that won't be a problem.
+    :param text:
+    :return: the SQLite compatible version of the text
+    """
+    if isinstance(text, unicode) or isinstance(text, str):
+        text = text.replace("'", "''")
+        text = re.sub(COLON_NOT_FOLLOWED_BY_SPACE_RE, "\:\g<1>", text)
+
+    return text
