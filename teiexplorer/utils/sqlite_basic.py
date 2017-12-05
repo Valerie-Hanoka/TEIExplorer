@@ -8,7 +8,10 @@ Author: Valérie Hanoka
 
 import logging
 import dataset
-from utils import merge_two_dicts
+from utils import (
+    merge_two_dicts,
+    prepare_sql_text
+)
 from lingutils import (
     parse_year_date,
     parse_person
@@ -99,7 +102,7 @@ class CorpusSQLiteDB(object):
         query = u' AND '.join(
             [u"'%s'='%s'" % (
                 i,
-                row_info[i].replace("'", "''") if isinstance(row_info[i], unicode) else row_info[i]
+                prepare_sql_text(row_info[i])
             )
              for i in row_info.keys()])
 
