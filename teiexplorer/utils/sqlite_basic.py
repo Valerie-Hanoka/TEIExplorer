@@ -144,12 +144,16 @@ class CorpusSQLiteDB(object):
                              )
                              )
 
-        item_info = self.get_ordered_metadata_attributes(doc_info.header_metadata.get(item))
+        item_unordered_info = doc_info.header_metadata.get(item, None)
+        if not item_unordered_info:
+            return
+        item_info = self.get_ordered_metadata_attributes(item_unordered_info)
         for (from_xml_element, rows) in item_info.items():
             for row_number, row_info in rows.items():
                 if modifier_function:
                     row_info = modifier_function(row_info)
-
+                if not row_info:
+                    continue
                 new_row_id = self._get_or_create_row(row_info, base_table)
 
                 doc_has_item_info = {
@@ -168,8 +172,8 @@ class CorpusSQLiteDB(object):
 
         # --- IDENTIFIER ---- #
         def add_url_type(row_info):
-            idno = row_info.get(u'idno')
-            if u'http://' in idno:
+            idno = row_info.get(u'idno', None)
+            if idno and u'http://' in idno:
                 row_info[u'type'] = u'url'
             return row_info
 
@@ -203,7 +207,9 @@ class CorpusSQLiteDB(object):
 
         # --- DOCUMENT AUTHORS --- #
         def normalise_author_information(row_info):
-            authors = row_info['author']
+            authors = row_info.get('author', None)
+            if not authors:
+                return
             if isinstance(authors, unicode):
                 row_info.update(parse_person(row_info['author']))
                 return row_info
