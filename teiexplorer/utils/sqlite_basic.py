@@ -9,14 +9,12 @@ Author: Valérie Hanoka
 import logging
 import dataset
 from utils import (
-    merge_two_dicts,
-    prepare_sql_text
+    merge_two_dicts
 )
 from lingutils import (
     parse_year_date,
     parse_person
 )
-from sqlalchemy import text
 from copy import deepcopy
 
 
@@ -97,16 +95,9 @@ class CorpusSQLiteDB(object):
 
 
     def _get_or_create_row(self, row_info, table):
-
-        # Finding if the element already exists in the DB
-        query = u' AND '.join(
-            [u"'%s'='%s'" % (
-                i,
-                prepare_sql_text(row_info[i])
-            )
-             for i in row_info.keys()])
-
-        new_row = table.find_one(text(query))
+        """ If the information is already stored in the table table, fetch its id and returns it.
+        Add it otherwise. """
+        new_row = table.find_one(**row_info)
         new_row_id = new_row.get('id', None) if new_row else table.insert(row_info)
         return new_row_id
 
