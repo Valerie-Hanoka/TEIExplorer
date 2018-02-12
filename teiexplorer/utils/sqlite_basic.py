@@ -113,8 +113,6 @@ class CorpusSQLiteDBWriter(object):
         if ark_id_dict:
             _, ark_id = ark_id_dict.values().pop().get('ark')[0]
             doc.document_metadata['ark'] = ark_id
-            import ipdb; ipdb.set_trace()
-
         return self.document_table.insert(doc.document_metadata)
         # TODO : Body parsing information
 
