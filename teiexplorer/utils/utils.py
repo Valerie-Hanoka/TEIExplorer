@@ -3,7 +3,6 @@
 
 from collections import defaultdict
 from copy import deepcopy
-import re
 
 def merge_two_dicts(x, y):
     """Given two dicts (with string keys),
@@ -59,5 +58,3 @@ def sum_dicts(*dicts):
         for k, v in d.items():
             summed[k] += v
     return dict(summed)
-
-

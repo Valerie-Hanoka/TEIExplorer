@@ -117,6 +117,11 @@ class TeiContent(DocumentContent):
             self.__recursive_tag_info_retriever(u'', metadata_root)
         )
 
+        # Adding Ark identifier if it exists
+        ark_id = self.etree_root.attrib.get('{http://www.w3.org/XML/1998/namespace}id', None)
+        if ark_id:
+            self.header_metadata[u'ark'] = (0, ark_id)
+
         # Cleaning useless or empty entries
         self.__clean_metadata()
 
@@ -278,9 +283,6 @@ class TeiContent(DocumentContent):
                 new_dic = merge_two_dicts(new_dic, current_attribute_dict)
 
         self.header_metadata = new_dic
-
-
-
 
     ######################
     #   CONTENT METRICS
