@@ -39,7 +39,11 @@ import time
 import json
 from optparse import OptionParser
 from teiexplorer.corpusreader import tei_content_scraper as tcscraper
-from teiexplorer.utils.sqlite_basic import CorpusSQLiteDB
+from teiexplorer.utils.sqlite_basic import (
+    CorpusSQLiteDBWriter,
+    CorpusSQLiteDBReader
+)
+
 # import metadataGraph as mdg
 
 
@@ -48,9 +52,43 @@ logging.basicConfig(
     level=logging.INFO)
 
 
+def parse_tei_documents(corpora, database):
+    """
+    Extracting metadata from all the documents in corpora.
+    Optionally saving this information in a SQLite database.
+    :param corpora: Corpora locations where TEI files are stored
+    :param database: The database where tmetadata should be stored. If none, no storage.
+    :return:
+    """
+    # The 'corpus_tag' corresponds to a label giving a hint on the corpus provenance.
+    for (corpus_tag, corpus_location) in corpora.items():
+        test_limit = 0
+        for document_file in glob.glob(corpus_location):
+            if debug_size and test_limit >= debug_size:
+                continue
+            test_limit += 1
+            logging.info(u"Parsing %s" % document_file)
+            document = tcscraper.TeiContent(document_file, corpus_tag)
+
+            # Doing clustering on content.
+            # if document.metadata:
+            # corpus.add_metadata(document_file, document.metadata)
+            # corpus.add_text_content(document_file,document.content_words)
+
+            # Adding the metadata information to the document
+            if database:
+                database.add_xml_document(document)
+
+            del document
+
+
 if __name__ == "__main__":
 
-    usage = "usage: ./%prog [--parse]"
+    usage = """usage: ./%prog [--parse]
+    E.g: parse TEI documents and save result in DB useAndReuse.db: 
+     • python main.py -c configs/config.json -p -s -d useAndReuse.db
+
+    """
     parser = OptionParser(usage)
     parser.add_option("-c", "--config",
                       dest="config_file",
@@ -61,7 +99,19 @@ if __name__ == "__main__":
                       )
     parser.add_option("-d", "--database",
                       dest="database",
-                      help="The database where the corpus info are/should be stored")
+                      help="The database where the corpus info are/should be stored.")
+
+    parser.add_option("-s", "--saveToDatabase",
+                      action="store_true",
+                      dest="save_to_database",
+                      default=False,
+                      help="Saves the corpus info in a database.")
+
+    parser.add_option("-a", "--amendTEIdocument",
+                      action="store_true",
+                      dest="amend_TEI",
+                      default=False,
+                      help="Saves the transformed metadata information in the TEI header.")
 
     (options, args) = parser.parse_args()
 
@@ -71,36 +121,21 @@ if __name__ == "__main__":
             debug_size = config.get("debug_size", None)
             corpora = config["corpora"]
 
-    # Results will be saved in a SQLite Database
+    # Results will be saved or read from a SQLite Database
     db_name = 'UseAndReuse_%s.sqlite' % time.strftime('%b_%d_%Y_%H:%M:%S')
     if options.database:
         db_name = options.database
-    db = CorpusSQLiteDB(db_name)
 
+    # -- Parse the corpus and optionally save it -- #
     if options.parse_tei:
-        # Iterating over the listed corpora. The 'corpus_tag' corresponds
-        # to a label giving a hint on the corpus provenance.
-        for (corpus_tag, corpus_location) in corpora.items():
-            test_limit = 0
-            for document_file in glob.glob(corpus_location):
-                if debug_size and test_limit >= debug_size:
-                    continue
-                test_limit += 1
-                logging.info(u"Parsing %s" % document_file)
-                document = tcscraper.TeiContent(document_file, corpus_tag)
-                db.add_xml_document(document)
+        db = CorpusSQLiteDBWriter(db_name) if options.save_to_database else None
+        parse_tei_documents(corpora, db)
 
-                #if document.metadata:
-                    # corpus.add_metadata(
-                    #     document_file,
-                    #     document.metadata
-                    # )
-                    # corpus.add_text_content(
-                    #     document_file,
-                    #     document.content_words
-                    # )
-                del document
-
+    # -- Modify corpus's TEI content -- #
+    if options.amend_TEI:
+        db = CorpusSQLiteDBReader(db_name)
+        db.treat_document()
+        #amend_tei_document(db)
 
 
     # # save_to_format(corpus.get_metadata_list(), options.output_filename, options.format)
@@ -119,11 +154,15 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
 ##########################################
 #     Temporary: Saving Results          #
 ##########################################
-
-
 # def save_to_json(data, json_output_filename):
 #     """Saves a Python data structure in a JSON file output_filename.
 #     :param data:

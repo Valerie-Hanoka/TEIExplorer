@@ -20,10 +20,29 @@ def is_content_word(word):
 
 
 # ----  Person  ---- #
-PERSON_RE = re.compile('(?P<last_name>^[^,(0-9]*),?\s*'
-                       '(?P<first_name_or_initials>[^(,]*)[^0-9]*'
-                       '(?P<birth>[0-9][0-9][0-9\.][0-9\.])?[^0-9]*'
-                       '(?P<death>[0-9][0-9][0-9\.][0-9\.])?')
+
+ALPHA_TOKEN = re.compile('\w+', re.UNICODE)
+import unicodedata
+
+def get_name_initials(name):
+    """
+    Returns the initials of a given name.
+    :param name:
+    :return:
+    """
+    return u''.join([
+        unicodedata.normalize('NFD', name_part)[0].lower()
+        for name_part in re.findall(ALPHA_TOKEN, name)])
+
+
+PERSON_WITH_COMMA_RE = re.compile('(?P<last_name>^[^,(0-9]*),?\s*'
+                                  '(?P<first_name_or_initials>[^(,]*)[^0-9]*'
+                                  '(?P<birth>[0-9][0-9][0-9\.][0-9\.])?[^0-9]*'
+                                  '(?P<death>[0-9][0-9][0-9\.][0-9\.])?')
+
+PERSON_WITHOUT_COMMA_RE = re.compile('(?P<first_name_or_initials>.*\s(de)?)?\s+'
+                                     '(?P<last_name>(la\s+)?[^\s]*?)',
+                                     re.IGNORECASE)
 
 
 def parse_person(value):
@@ -31,17 +50,27 @@ def parse_person(value):
     :param value:
     :return:
     """
-    match = re.search(PERSON_RE, value)
     parsed = {}
-    if match:
-        parsed = match.groupdict()
+    # Case I: The name of the person has the form:
+    # Name, SurnameOrInitials [(birthDate - deathDate)]
+    match_person_with_comma = re.search(PERSON_WITH_COMMA_RE, value)
+    if match_person_with_comma:
+        parsed = match_person_with_comma.groupdict()
+    else:
+        # Case II: The name of the person has the form:
+        # SurnameOrInitials Name  OR  Name
+        match_person_without_comma = re.search(PERSON_WITHOUT_COMMA_RE, value)
+        if match_person_without_comma:
+            parsed = match_person_with_comma.groupdict()
 
+    if parsed:
         # Computing the author "fingerprint" which will be used to reconcile the authors
         first_name = parsed.get('first_name_or_initials', u'')
-        first_letter = first_name[0] if len(first_name) > 0 else u''
-        parsed['fingerprint'] = unicode(
-            filter(str.isalpha, str.lower(
-                unidecode.unidecode(parsed.get('last_name', u'')+first_letter))))
+        initials = get_name_initials(first_name) if len(first_name) > 0 else u''
+        parsed['fingerprint'] = u"%s%s" %(
+            filter(str.isalpha, str.lower(unidecode.unidecode(parsed.get('last_name', u'')))),
+            initials
+        )
     return parsed
 
 

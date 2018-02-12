@@ -16,9 +16,9 @@ from lingutils import (
     parse_person
 )
 from copy import deepcopy
+from pylru import lrudecorator
 
-
-class CorpusSQLiteDB(object):
+class CorpusSQLiteDBWriter(object):
     """
     Class which stores in an SQLite DB the content of
     the information retrieved from the XML-TEI corpora.
@@ -33,23 +33,39 @@ class CorpusSQLiteDB(object):
     def __init__(self, db_name):
         self.db = dataset.connect(u'sqlite:///%s' % db_name)
 
+        if not self.db.tables:
         # Tables
+            self.document_table = self.db.create_table('document',
+                                                       primary_id=u'_file',
+                                                       primary_type=self.db.types.string(200))
 
-        self.document_table = self.db.create_table('document',
-                                                   primary_id=u'_file',
-                                                   primary_type=self.db.types.string(200))
+            self.idno_table = self.db.create_table('identifier')
+            self.document_has_idno_table = self.db.create_table('documentHasIdentifier')
 
-        self.idno_table = self.db.create_table('identifier')
-        self.document_has_idno_table = self.db.create_table('documentHasIdentifier')
+            self.date_table = self.db.create_table('date')
+            self.document_has_date_table = self.db.create_table('documentHasDate')
 
-        self.date_table = self.db.create_table('date')
-        self.document_has_date_table = self.db.create_table('documentHasDate')
+            self.person_table = self.db.create_table('person')
+            self.document_has_author_table = self.db.create_table('documentHasAuthor')
 
-        self.person_table = self.db.create_table('person')
-        self.document_has_author_table = self.db.create_table('documentHasAuthor')
+            self.title_table = self.db.create_table('title')
+            self.document_has_title_table = self.db.create_table('documentHasTitle')
 
-        self.title_table = self.db.create_table('title')
-        self.document_has_title_table = self.db.create_table('documentHasTitle')
+        else:
+            self.document_table = self.db['document']
+            self.idno_table = self.db['identifier']
+            self.document_has_idno_table = self.db['documentHasIdentifier']
+
+            self.date_table = self.db['date']
+            self.document_has_date_table = self.db['documentHasDate']
+
+            self.person_table = self.db['person']
+            self.document_has_author_table = self.db['documentHasAuthor']
+
+            self.title_table = self.db['title']
+            self.document_has_title_table = self.db['documentHasTitle']
+
+
 
     def get_ordered_metadata_attributes(self, attribute_dict):
         """
@@ -90,6 +106,15 @@ class CorpusSQLiteDB(object):
 
     def _insert_document_row(self, doc):
         """Add the current document in the document_table"""
+
+
+
+        ark_id_dict = doc.header_metadata.get('ark')
+        if ark_id_dict:
+            _, ark_id = ark_id_dict.values().pop().get('ark')[0]
+            doc.document_metadata['ark'] = ark_id
+            import ipdb; ipdb.set_trace()
+
         return self.document_table.insert(doc.document_metadata)
         # TODO : Body parsing information
 
@@ -154,6 +179,44 @@ class CorpusSQLiteDB(object):
                 }
                 self._get_or_create_row(doc_has_item_info, relational_table)
 
+
+    # ----  Transforming Information for table modification  ----#
+
+    def modify_url_type(self, row_info):
+        idno = row_info.get(u'idno', None)
+        if idno and u'http://' in idno:
+            row_info[u'type'] = u'url'
+        return row_info
+
+    def normalise_date_information(self, row_info):
+        edited_date = row_info.get(u'when', None)  # corresponds to the cleanest date information we could use
+        date = edited_date if edited_date else row_info.get(u'date', None)
+
+        parsed_info_dict = parse_year_date(date)
+        row_info.update(parsed_info_dict)
+        return row_info
+
+    def normalise_author_information(self, row_info):
+        authors = row_info.get('author', None)
+
+        if not authors:
+            return
+
+        if isinstance(authors, unicode):
+            row_info.update(parse_person(row_info['author']))
+            return row_info
+
+        elif isinstance(authors, list):
+            authors_info = []
+            row_info.pop('author')
+            # pop author
+            for author in authors:
+                author_row_info = deepcopy(row_info)
+                author_row_info.update(parse_person(author))
+                author_row_info['author'] = author
+                authors_info.append(author_row_info)
+            return authors_info
+
     def add_xml_document(self, doc):
         """Saves a DocumentContent() in a SQLite database."""
         logging.info("Saving document %s in the database." % doc.document_metadata.get(u'_file'))
@@ -162,15 +225,9 @@ class CorpusSQLiteDB(object):
         document_id = self._insert_document_row(doc)
 
         # --- IDENTIFIER ---- #
-        def add_url_type(row_info):
-            idno = row_info.get(u'idno', None)
-            if idno and u'http://' in idno:
-                row_info[u'type'] = u'url'
-            return row_info
-
         self._insert_document_item_row(
             item=u'idno',
-            modifier_function=add_url_type,
+            modifier_function=self.modify_url_type,
             base_table=self.idno_table,
             relational_table=self.document_has_idno_table,
             doc_info=doc,
@@ -178,18 +235,9 @@ class CorpusSQLiteDB(object):
         )
 
         # --- DOCUMENT DATE --- #
-        def normalise_date_information(row_info):
-
-            edited_date = row_info.get(u'when', None)  # corresponds to the cleanest date information we could use
-            date = edited_date if edited_date else row_info.get(u'date', None)
-
-            parsed_info_dict = parse_year_date(date)
-            row_info.update(parsed_info_dict)
-            return row_info
-
         self._insert_document_item_row(
             item=u'date',
-            modifier_function=normalise_date_information,
+            modifier_function=self.normalise_date_information,
             base_table=self.date_table,
             relational_table=self.document_has_date_table,
             doc_info=doc,
@@ -197,27 +245,9 @@ class CorpusSQLiteDB(object):
         )
 
         # --- DOCUMENT AUTHORS --- #
-        def normalise_author_information(row_info):
-            authors = row_info.get('author', None)
-            if not authors:
-                return
-            if isinstance(authors, unicode):
-                row_info.update(parse_person(row_info['author']))
-                return row_info
-            elif isinstance(authors, list):
-                authors_info = []
-                row_info.pop('author')
-                # pop author
-                for author in authors:
-                    author_row_info = deepcopy(row_info)
-                    author_row_info.update(parse_person(author))
-                    author_row_info['author'] = author
-                    authors_info.append(author_row_info)
-                return authors_info
-
         self._insert_document_item_row(
             item=u'author',
-            modifier_function=normalise_author_information,
+            modifier_function=self.normalise_author_information,
             base_table=self.person_table,
             relational_table=self.document_has_author_table,
             doc_info=doc,
@@ -232,3 +262,174 @@ class CorpusSQLiteDB(object):
             doc_info=doc,
             doc_id=document_id
         )
+
+
+class CorpusSQLiteDBReader(object):
+
+
+    logging.basicConfig(
+            format='%(asctime)s : %(levelname)s : %(message)s',
+            level=logging.INFO)
+
+    db = None
+
+    def __init__(self, db_name):
+        self.db = dataset.connect(u'sqlite:///%s' % db_name)
+
+        # Checking that we have every necessary column in the DB
+        try:
+
+            expected_tables = {u'date',
+                               u'document',
+                               u'documentHasAuthor',
+                               u'documentHasDate',
+                               u'documentHasIdentifier',
+                               u'documentHasTitle',
+                               u'identifier',
+                               u'person',
+                               u'title'}
+            assert len(expected_tables-set(self.db.tables)) == 0
+        except AssertionError:
+            raise IOError("Database does not correspond to what is expected.")
+
+        self.document_table = self.db['document']
+        self.idno_table = self.db['identifier']
+        self.document_has_idno_table = self.db['documentHasIdentifier']
+        self.date_table = self.db['date']
+        self.document_has_date_table = self.db['documentHasDate']
+        self.person_table = self.db['person']
+        self.document_has_author_table = self.db['documentHasAuthor']
+        self.title_table = self.db['title']
+        self.document_has_title_table = self.db['documentHasTitle']
+
+    def treat_document(self):
+
+        for document in self.document_table:
+            doc_id = document['_file']
+            doc_info = self.get_document_information_in_db(doc_id)
+
+            import pprint
+            pprint.pprint(doc_info)
+
+
+    def get_document_information_in_db(self, doc_id):
+        """Iterates over all the documents SQLite database."""
+
+        info = dict()
+        info['authors'] = self._get_normalised_authors(doc_id)
+        info['date'] = self._get_earliest_dates(doc_id)
+        info['title'] = self._get_full_title(doc_id)
+
+        # Computing age of the eldest author at the first publication date
+        if info.get('authors') and info.get('date'):
+            try:
+                eldest_author_birth_year = \
+                    int(
+                        sorted([y.get('birth', '99999')
+                                for y in info.get('authors').values()])[0])
+                pub_date = int(info.get('date'))
+                if 1 < eldest_author_birth_year < 2000 and pub_date:
+                    info['age_at_publication'] = pub_date - eldest_author_birth_year
+            except ValueError:
+                pass
+
+        return info
+
+
+
+    def _get_full_title(self, doc_id):
+
+        raw_titles = [
+            self.title_table.find_one(id=doc_has_title['title_id'])
+            for doc_has_title
+            in self.document_has_title_table.find(document_id=doc_id)
+        ]
+
+        seen_titles = {}
+        titles = []
+        for raw_title in raw_titles:
+            t = raw_title.get('title', None)
+            if t:
+                is_present = seen_titles.get(t.lower(), None)
+                if not is_present:
+                    titles.append((raw_title.get('level', u'ȥ') or u'ȥ', t))
+                    seen_titles[t.lower()] = 1
+            else:
+                print("%s is present already" %t)
+        
+        concatenated_title = u' — '.join([ title for (_, title) in sorted(titles, reverse=True)])
+        return concatenated_title
+
+    def _get_earliest_dates(self, doc_id):
+
+        db_dates = [
+            self.date_table.find_one(id=doc_has_date['date_id'])
+            for doc_has_date
+            in self.document_has_date_table.find(document_id=doc_id)
+        ]
+
+        if not db_dates:
+            return
+
+        dates = set([])
+        for date in db_dates:
+            try:
+                int(date.get('deduced_date'))
+                dates.add(date.get('deduced_date'))
+            except TypeError:
+                # Partial dates
+                m = int(date.get('millennium', '-1'))
+                c = int(date.get('century', '-1'))
+                d = int(date.get('decade', '-1'))
+                y = int(date.get('year', '-1'))
+
+                m = str(m) if m > -1 else ' '
+                c = str(c) if c > -1 else ' '
+                d = str(d) if d > -1 else ' '
+                y = str(y) if y > -1 else ' '
+                deduced_date = "%s%s%s%s" % (m, c, d, y)
+                dates.add(int(deduced_date.strip()))
+
+        earliest = str(sorted(dates)[0])
+        while len(earliest) < 4:
+            earliest = "%s." % earliest
+
+        return earliest
+
+    def _get_normalised_authors(self, doc_id):
+        doc_authors = [
+            self.person_table.find_one(id=doc_has_author['author_id'])
+            for doc_has_author
+            in self.document_has_author_table.find(document_id=doc_id)
+        ]
+
+        if not doc_authors:
+            return
+
+        fingerprint_info = {
+            author.get('fingerprint'): {'role':  author.get('role')}
+            for author in doc_authors
+        }
+
+
+        for fingerprint in fingerprint_info:
+            fingerprint_info[fingerprint] = self._reconcile_fingerprints(fingerprint)
+        return fingerprint_info
+
+
+    @lrudecorator(300)
+    def _reconcile_fingerprints(self, fingerprint):
+
+        similar_authors = [p for p in self.person_table.find(fingerprint=fingerprint)]
+
+        ignore_info = ['id', 'role', 'fingerprint']
+        # For all the similar authors (i.e: same fingerprints),
+        # we chose to keep the one displaying the most information
+        reconciled = sorted(similar_authors, key=lambda x: len(x['author']))[-1]
+        info = dict()
+        for (k, v) in reconciled.items():
+            if k in ignore_info or not v:
+                continue
+            info[k] = v
+        return info
+

@@ -27,7 +27,6 @@ def test_utils_merge_two_dicts1():
         'only_x': {'only_x': 'baz'},
         'only_y': 'only_y'
     }
-
     assert cmp(merged, truth) == 0
 
 
@@ -43,10 +42,6 @@ def test_utils_merge_two_dicts2():
         'only_x': 'only_x',
         'only_y': 'only_y'
     }
-
-    import pprint
-    pprint.pprint(merged)
-
     assert cmp(merged, truth) == 0
 
 
