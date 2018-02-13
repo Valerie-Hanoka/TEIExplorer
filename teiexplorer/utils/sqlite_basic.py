@@ -217,7 +217,7 @@ class CorpusSQLiteDBWriter(object):
 
     def add_xml_document(self, doc):
         """Saves a DocumentContent() in a SQLite database."""
-        logging.info("Saving document %s in the database." % doc.document_metadata.get(u'_file'))
+        logging.debug("Saving document %s in the database." % doc.document_metadata.get(u'_file'))
 
         # --- DOCUMENT ---- #
         document_id = self._insert_document_row(doc)
@@ -376,22 +376,27 @@ class CorpusSQLiteDBReader(object):
                 dates.add(date.get('deduced_date'))
             except TypeError:
                 # Partial dates
-                m = int(date.get('millennium', '-1'))
-                c = int(date.get('century', '-1'))
-                d = int(date.get('decade', '-1'))
-                y = int(date.get('year', '-1'))
+                m = date.get('millennium', '-1')
+                c = date.get('century', '-1')
+                d = date.get('decade', '-1')
+                y = date.get('year', '-1')
 
-                m = str(m) if m > -1 else ' '
-                c = str(c) if c > -1 else ' '
-                d = str(d) if d > -1 else ' '
-                y = str(y) if y > -1 else ' '
+                m = str(m) if (m and int(m) > -1) else ' '
+                c = str(c) if (c and int(c) > -1) else ' '
+                d = str(d) if (d and int(d) > -1) else ' '
+                y = str(y) if (y and int(y) > -1) else ' '
                 deduced_date = "%s%s%s%s" % (m, c, d, y)
-                dates.add(int(deduced_date.strip()))
+                deduced_date = deduced_date.strip()
+                if deduced_date:
+                    dates.add(int(deduced_date))
 
-        earliest = str(sorted(dates)[0])
-        while len(earliest) < 4:
-            earliest = "%s." % earliest
+        if dates:
+            earliest = str(sorted(dates)[0])
+            while len(earliest) < 4:
+                earliest = "%s." % earliest
 
+        else:
+            earliest = '....'
         return earliest
 
     def _get_normalised_authors(self, doc_id):
@@ -405,13 +410,13 @@ class CorpusSQLiteDBReader(object):
             return
 
         fingerprint_info = {
-            author.get('fingerprint'): {'role':  author.get('role')}
+            author.get('fingerprint'): {'role':  author.get('role', '')}
             for author in doc_authors
         }
-
+        import pprint; pprint.pprint(fingerprint_info)
 
         for fingerprint in fingerprint_info:
-            fingerprint_info[fingerprint] = self._reconcile_fingerprints(fingerprint)
+            fingerprint_info[fingerprint].update(self._reconcile_fingerprints(fingerprint))
         return fingerprint_info
 
 
@@ -420,7 +425,7 @@ class CorpusSQLiteDBReader(object):
 
         similar_authors = [p for p in self.person_table.find(fingerprint=fingerprint)]
 
-        ignore_info = ['id', 'role', 'fingerprint']
+        ignore_info = ['id', 'role', 'fingerprint', 'type']
         # For all the similar authors (i.e: same fingerprints),
         # we chose to keep the one displaying the most information
         reconciled = sorted(similar_authors, key=lambda x: len(x['author']))[-1]

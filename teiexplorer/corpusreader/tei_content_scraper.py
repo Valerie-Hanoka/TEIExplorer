@@ -301,7 +301,7 @@ class TeiContent(DocumentContent):
         bodies = self.etree_xml.find(tag)
         if bodies is None or not bodies.keys(): # TODO not parsed at all
             self.document_metadata[u'_body_parsed'] = False
-            logging.warning("File %s body is ill-formed. Not Parsing it." % self.filePath)
+            logging.debug("File %s body is ill-formed. Not Parsing it." % self.filePath)
             return
 
         for body in bodies:
