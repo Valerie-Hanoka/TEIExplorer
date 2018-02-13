@@ -67,7 +67,7 @@ def parse_tei_documents(corpora, database):
             if debug_size and test_limit >= debug_size:
                 continue
             test_limit += 1
-            logging.debug(u"Parsing %s" % document_file)
+            logging.info(u"Parsing %s" % document_file)
             document = tcscraper.TeiContent(document_file, corpus_tag)
 
             # Doing clustering on content.
