@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 import re
 import unidecode
+import unicodedata
+
+from pylru import lrudecorator
 
 
 # ---- Crappy Termhood Approximation ---- #
@@ -22,14 +25,22 @@ def is_content_word(word):
 # ----  Person  ---- #
 
 ALPHA_TOKEN = re.compile('\w+', re.UNICODE)
-import unicodedata
 
+PARTICULE_DE_RE = re.compile('\s+d[e\'][\s,$]+', re.IGNORECASE)
+name_stopwords = [u'mme', u'madame', u'monsieur',
+                  u'abb[ée]', u'm. de', u'comte de', u'prince']
+NAME_STOPWORDS_RE = re.compile(u" +| +".join(name_stopwords), re.IGNORECASE)
+
+@lrudecorator(100)
 def get_name_initials(name):
     """
     Returns the initials of a given name.
     :param name:
     :return:
     """
+    name = u" %s " % name
+    name = re.sub(NAME_STOPWORDS_RE, ' ', name)
+    name = re.sub(PARTICULE_DE_RE, ' ', name)
     return u''.join([
         unicodedata.normalize('NFD', name_part)[0].lower()
         for name_part in re.findall(ALPHA_TOKEN, name)])
