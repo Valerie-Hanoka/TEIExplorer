@@ -2,9 +2,24 @@
 # -*- coding: utf-8 -*-
 import re
 import unidecode
-import unicodedata
+from unicodedata import normalize
 
 from pylru import lrudecorator
+
+# --- String Normalization --- #
+
+def normalize_str(s):
+    """ Remove leading and trailing and multiple whitspaces from a string s.
+
+    :param s: a string or unicode
+    :return: the unicode normalised version of s
+    """
+    if isinstance(s, str):
+        s = unicode(s.strip(), 'utf-8')
+    else:
+        s = s.strip()
+    s = normalize('NFC', s)
+    return u' '.join(s.split())
 
 
 # ---- Crappy Termhood Approximation ---- #
@@ -42,7 +57,7 @@ def get_name_initials(name):
     name = re.sub(NAME_STOPWORDS_RE, ' ', name)
     name = re.sub(PARTICULE_DE_RE, ' ', name)
     return u''.join([
-        unicodedata.normalize('NFD', name_part)[0].lower()
+        normalize('NFD', name_part)[0].lower()
         for name_part in re.findall(ALPHA_TOKEN, name)])
 
 

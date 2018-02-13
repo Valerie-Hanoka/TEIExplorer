@@ -12,11 +12,13 @@ from utils import (
     merge_two_dicts
 )
 from lingutils import (
+    normalize_str,
     parse_year_date,
     parse_person
 )
 from copy import deepcopy
 from pylru import lrudecorator
+import math
 
 class CorpusSQLiteDBWriter(object):
     """
@@ -306,8 +308,7 @@ class CorpusSQLiteDBReader(object):
             doc_id = document['_file']
             doc_info = self.get_document_information_in_db(doc_id)
 
-            import pprint
-            pprint.pprint(doc_info)
+            import pprint; pprint.pprint(doc_info)
 
 
     def get_document_information_in_db(self, doc_id):
@@ -318,6 +319,10 @@ class CorpusSQLiteDBReader(object):
         info['date'] = self._get_earliest_dates(doc_id)
         info['title'] = self._get_full_title(doc_id)
 
+        # If the same author has 2 entries, we keep only the more
+        # descriptive:
+        info['authors'] = self._reconcile_authors(info.get('authors'))
+        
         # Computing age of the eldest author at the first publication date
         if info.get('authors') and info.get('date'):
             try:
@@ -331,9 +336,44 @@ class CorpusSQLiteDBReader(object):
             except ValueError:
                 pass
 
+        # Computing a score of meta-data information
+        informativeness = self.dict_informativeness(info)
+        normalized_score = round(1.0 - (1.0/(math.log(informativeness)+1.0)), 2)
+        info['meta-data_comprehensiveness_score'] = normalized_score
         return info
 
 
+    def _reconcile_authors(self, authors):
+
+        if authors and len(authors) > 1:
+            keys_beginning = [k[0:4] for k in authors.keys()]
+            duplicates_beginning = {
+                k: keys_beginning.count(k)
+                for k in keys_beginning
+                if keys_beginning.count(k) > 1
+            }
+            for duplicate_beginning in duplicates_beginning:
+                # Bold guess...
+                dict_informativeness = {
+                    self.dict_informativeness(d): k
+                    for k, d in authors.iteritems()
+                    if k.startswith(duplicate_beginning)
+                }
+                most_informative_key = dict_informativeness[max(dict_informativeness)]
+                for k in authors.keys():
+                    if k is not most_informative_key:
+                        authors.pop(k)
+        return authors
+
+    def dict_informativeness(self, dictionary, depth=0, alpha=1.5):
+        "Heuristic"
+        if isinstance(dictionary, dict):
+            return alpha * sum([
+                self.dict_informativeness(x, depth + alpha)
+                for x in dictionary.values()
+            ])
+        else:
+            return 1.0/(depth + 1.0)
 
     def _get_full_title(self, doc_id):
 
@@ -352,10 +392,9 @@ class CorpusSQLiteDBReader(object):
                 if not is_present:
                     titles.append((raw_title.get('level', u'ȥ') or u'ȥ', t))
                     seen_titles[t.lower()] = 1
-            else:
-                print("%s is present already" %t)
-        
+
         concatenated_title = u' — '.join([ title for (_, title) in sorted(titles, reverse=True)])
+        concatenated_title = normalize_str(concatenated_title)
         return concatenated_title
 
     def _get_earliest_dates(self, doc_id):
@@ -410,11 +449,9 @@ class CorpusSQLiteDBReader(object):
             return
 
         fingerprint_info = {
-            author.get('fingerprint'): {'role':  author.get('role', '')}
+            author.get('fingerprint'): {'role':  author.get('role', 'N.C.')}
             for author in doc_authors
         }
-        import pprint; pprint.pprint(fingerprint_info)
-
         for fingerprint in fingerprint_info:
             fingerprint_info[fingerprint].update(self._reconcile_fingerprints(fingerprint))
         return fingerprint_info
