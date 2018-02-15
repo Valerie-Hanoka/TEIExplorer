@@ -17,8 +17,14 @@ from lingutils import (
     parse_person
 )
 from copy import deepcopy
+
 from pylru import lrudecorator
 import math
+import io
+
+from teiexplorer.corpusreader import tei_content_scraper as tcscraper
+
+
 
 class CorpusSQLiteDBWriter(object):
     """
@@ -27,7 +33,7 @@ class CorpusSQLiteDBWriter(object):
     """
 
     logging.basicConfig(
-            format='%(asctime)s : %(levelname)s : %(message)s',
+            format='%(asctime)s: %(levelname)s : %(message)s',
             level=logging.INFO)
 
     db = None
@@ -108,9 +114,6 @@ class CorpusSQLiteDBWriter(object):
 
     def _insert_document_row(self, doc):
         """Add the current document in the document_table"""
-
-
-
         ark_id_dict = doc.header_metadata.get('ark')
         if ark_id_dict:
             _, ark_id = ark_id_dict.values().pop().get('ark')[0]
@@ -302,13 +305,31 @@ class CorpusSQLiteDBReader(object):
         self.title_table = self.db['title']
         self.document_has_title_table = self.db['documentHasTitle']
 
-    def treat_document(self):
+    def treat_document(self, modify_TEI=True):
+
+        with io.open(
+                '/Users/hanoka/obvil/TEIExplorer/data/databases/dewey_corresp_utf8.tsv',
+                mode='r',
+                encoding="utf-8") as dewey_file:
+            deweys_lines = [row.split('\t') for row in dewey_file.readlines()]
+            deweys = {row[0]: row[1:] for row in deweys_lines}
 
         for document in self.document_table:
+
             doc_id = document['_file']
             doc_info = self.get_document_information_in_db(doc_id)
 
-            import pprint; pprint.pprint(doc_info)
+            # Adding Dewey
+            ark = document.get('ark')
+            if ark:
+                dewey_info = deweys.get(ark)
+                if dewey_info:
+                    dewey_code = ' - '.join(deweys.get(document.get('ark')))
+                    doc_info['dewey'] = normalize_str(dewey_code)
+
+            if modify_TEI:
+                tei_content = tcscraper.TeiContent(doc_id, document['_tag'])
+                tei_content.add_to_header(doc_info)
 
 
     def get_document_information_in_db(self, doc_id):
@@ -342,7 +363,6 @@ class CorpusSQLiteDBReader(object):
         info['meta-data_comprehensiveness_score'] = normalized_score
         return info
 
-
     def _reconcile_authors(self, authors):
 
         if authors and len(authors) > 1:
@@ -360,13 +380,22 @@ class CorpusSQLiteDBReader(object):
                     if k.startswith(duplicate_beginning)
                 }
                 most_informative_key = dict_informativeness[max(dict_informativeness)]
+                author_keys = set([])
                 for k in authors.keys():
                     if k is not most_informative_key:
+                        if authors[k].get('key'):
+                            author_keys.add(authors[k].get('key'))
                         authors.pop(k)
+
+                for k in authors.keys():
+                    if authors[k].get('key'):
+                        author_keys.add(authors[k].get('key'))
+                    authors[k]['key'] = u', '.join(author_keys)
+
         return authors
 
     def dict_informativeness(self, dictionary, depth=0, alpha=1.5):
-        "Heuristic"
+        """Heuristic"""
         if isinstance(dictionary, dict):
             return alpha * sum([
                 self.dict_informativeness(x, depth + alpha)
@@ -449,13 +478,21 @@ class CorpusSQLiteDBReader(object):
             return
 
         fingerprint_info = {
-            author.get('fingerprint'): {'role':  author.get('role', 'N.C.')}
+            author.get('fingerprint'): {
+                'role':  author.get('role', 'N.C.'),
+                'alpha_key': author.get('fingerprint')
+            }
             for author in doc_authors
         }
         for fingerprint in fingerprint_info:
             fingerprint_info[fingerprint].update(self._reconcile_fingerprints(fingerprint))
+            fingerprint_info[fingerprint] = {
+                k.strip(): v.strip()
+                for k, v
+                in fingerprint_info[fingerprint].items()
+                if v
+            }
         return fingerprint_info
-
 
     @lrudecorator(300)
     def _reconcile_fingerprints(self, fingerprint):

@@ -109,3 +109,7 @@ data/results/
 configs
 *.db
 *.sqlite
+
+
+# Other
+.DS_Store
