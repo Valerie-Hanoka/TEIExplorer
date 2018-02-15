@@ -79,7 +79,9 @@ class TeiContent(DocumentContent):
 
         if self.etree_xml:
             self.__parse_header()
-            self.__get_body_metrics()
+            #self.__get_body_metrics()
+
+
 
     def __initialise_parser(self):
         """Initialization of the XML/TEI parser for current document
@@ -96,7 +98,7 @@ class TeiContent(DocumentContent):
             self.etree_xml = etree.parse(self.filePath, parser=utf8_parser)
             self.namespace = '{' + self.etree_xml.xpath('namespace-uri(.)') + '}'
         except etree.XMLSyntaxError:
-            logging.warning(u"Ignoring file %s" % self.filePath)
+            logging.error(u"Ignoring file %s - XMLSyntaxError" % self.filePath)
 
     ######################
     #      HEADERS
@@ -283,6 +285,45 @@ class TeiContent(DocumentContent):
                 new_dic = merge_two_dicts(new_dic, current_attribute_dict)
 
         self.header_metadata = new_dic
+
+
+    #########################
+    #  ADDING CONTENT TO TEI
+    #########################
+
+    def add_to_header(self, info_dict):
+        """Add the XML representation of info_dict in the header of the current
+         TEI Document"""
+
+        metadata_root = self.etree_root.find(self.namespace + u'teiHeader')
+        additional_info_tag = etree.Element("obvilInfo")
+        metadata_root.append(additional_info_tag)
+        self.add_to_xml(info_dict, parent=additional_info_tag)
+        self.etree_xml.write(
+            self.filePath,
+            pretty_print=True,
+            encoding="UTF-8",
+            xml_declaration=False)
+
+
+    def add_to_xml(self, info_dict, parent):
+        """Add the XML representation of info_dict under the
+         parent in  the current TEI Document"""
+
+        for info_key, info_value in info_dict.iteritems():
+            new_sub_element = etree.Element(info_key)
+            if isinstance(info_value, dict):
+                self.add_to_xml(info_value, new_sub_element)
+
+            else:
+                if isinstance(info_value, int) or isinstance(info_value, float):
+                    new_sub_element.text = str(info_value)
+                else:
+                    new_sub_element.text = info_value
+            parent.append(new_sub_element)
+        return parent
+
+
 
     ######################
     #   CONTENT METRICS

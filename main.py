@@ -44,6 +44,7 @@ from teiexplorer.utils.sqlite_basic import (
     CorpusSQLiteDBReader
 )
 
+
 # import metadataGraph as mdg
 
 
@@ -135,7 +136,7 @@ if __name__ == "__main__":
     if options.amend_TEI:
         db = CorpusSQLiteDBReader(db_name)
         db.treat_document()
-        #amend_tei_document(db)
+
 
 
     # # save_to_format(corpus.get_metadata_list(), options.output_filename, options.format)
