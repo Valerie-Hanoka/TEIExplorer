@@ -86,8 +86,11 @@ def parse_tei_documents(corpora, database):
 if __name__ == "__main__":
 
     usage = """usage: ./%prog [--parse]
-    E.g: parse TEI documents and save result in DB useAndReuse.db: 
-     • python main.py -c configs/config.json -p -s -d useAndReuse.db
+    • parse TEI documents and save result in DB useAndReuse.db: 
+      python main.py -c configs/config.json -p -s -d metadata.db
+    • use a previously computed metadata DB metadata.db to save the transformed
+      metadata information in the header of a new document:
+      python main.py -c configs/config.json -a -d useAndReuse.db
 
     """
     parser = OptionParser(usage)
@@ -135,7 +138,7 @@ if __name__ == "__main__":
     # -- Modify corpus's TEI content -- #
     if options.amend_TEI:
         db = CorpusSQLiteDBReader(db_name)
-        db.treat_document()
+        db.treat_document(dewey_filepath='data/databases/dewey_corresp_utf8.tsv')
 
 
 
@@ -194,3 +197,6 @@ if __name__ == "__main__":
 #     else:
 #         save_to_json(data, 'data/results/%s' % result_file + "json")
 #         logging.info(u"Saved in %sjson" % result_file)
+
+
+sum([20,14,14,13,13,13,13,12,12,12,11,11,11,10,10,10,10,9,9,9,9,9,9,9,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6])

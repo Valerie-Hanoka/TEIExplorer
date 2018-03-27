@@ -16,12 +16,16 @@ from lingutils import (
     parse_year_date,
     parse_person
 )
+
+from metadata import (
+    load_tsv_dewey
+)
 from copy import deepcopy
 
 from pylru import lrudecorator
 import math
-import io
-
+import unicodedata
+from re import compile, sub
 from teiexplorer.corpusreader import tei_content_scraper as tcscraper
 
 
@@ -305,19 +309,26 @@ class CorpusSQLiteDBReader(object):
         self.title_table = self.db['title']
         self.document_has_title_table = self.db['documentHasTitle']
 
-    def treat_document(self, modify_TEI=True):
+    def treat_document(
+            self,
+            modify_TEI=True,
+            dewey_filepath='dewey_corresp_utf8.tsv'):
 
-        with io.open(
-                '/Users/hanoka/obvil/TEIExplorer/data/databases/dewey_corresp_utf8.tsv',
-                mode='r',
-                encoding="utf-8") as dewey_file:
-            deweys_lines = [row.split('\t') for row in dewey_file.readlines()]
-            deweys = {row[0]: row[1:] for row in deweys_lines}
+        # Getting Dewey codes
+        deweys = load_tsv_dewey(dewey_filepath)
+
+        # Getting fingerprint order and to ignore
+        authors_precedence = self.get_fingerprints_with_precedence_information()
+        ignore_reconciliation = self.compute_fingerprints_ambiguity()
 
         for document in self.document_table:
 
             doc_id = document['_file']
-            doc_info = self.get_document_information_in_db(doc_id)
+            doc_info = self.get_document_information_in_db(
+                doc_id,
+                authors_precedence,
+                ignore_reconciliation
+            )
 
             # Adding Dewey
             ark = document.get('ark')
@@ -327,43 +338,137 @@ class CorpusSQLiteDBReader(object):
                     dewey_code = ' - '.join(deweys.get(document.get('ark')))
                     doc_info['dewey'] = normalize_str(dewey_code)
 
+
+            # Getting back the authors, depending on if they
+            # are reconciliated or not
+            final_authors_info = {}
+            if doc_info.get('authors'):
+                for author_key, author_dict in doc_info['authors'].items():
+                    if author_dict.get('is_reconciliated') == 'True':
+                        final_authors_info[author_key] = author_dict
+                    else:
+                        tmp = author_dict.get(doc_id)
+                        for key in author_dict.keys():
+                            if not key == doc_id:
+                                tmp[key] = author_dict[key]
+                        final_authors_info[author_key] = tmp
+
+            # Ordering authors with a heuristic
+            # *first* by frequency (the more the author is frequent, the more
+            # he is susceptible to be 1st author
+            # *then* by its id in the db
+            sorted_authors_list = []
+            if final_authors_info:
+                sorted_authors_list = sorted(
+                    final_authors_info.values(),
+                    key=lambda x: (1.0/x.get('freq'), x.get('min_id')))
+
+            publication_date = doc_info.get('date')
+            sorted_authors = {}
+            for a in range(0, len(sorted_authors_list)):
+                key = "author_%i" % (a+1)
+                values = sorted_authors_list[a]
+                values.pop('freq')
+                values.pop('min_id')
+
+                # Computing age of the author at the first publication date
+                if publication_date and values.get('birth'):
+                    try:
+                        birth = int(values.get('birth'))
+                        if 1 < birth < 1986:
+                            values['age_at_publication'] = int(publication_date) - birth
+                    except ValueError:
+                        pass
+                sorted_authors[key] = values
+
+            doc_info['authors'] = sorted_authors
+
             if modify_TEI:
                 tei_content = tcscraper.TeiContent(doc_id, document['_tag'])
                 tei_content.add_to_header(doc_info)
 
 
-    def get_document_information_in_db(self, doc_id):
+    def compute_fingerprints_ambiguity(self):
+
+        fingerprint_surnames = self.db.query(
+            'select fingerprint, first_name_or_initials from person')
+
+        corrected_surnames = {}
+
+        RE_SPACES = compile('\s+')
+
+        for elem in fingerprint_surnames:
+            surnames = corrected_surnames.get(elem['fingerprint'], set([]))
+            normalized_surname = unicodedata\
+                .normalize('NFKD', elem['first_name_or_initials'])\
+                .encode('ASCII', 'ignore')\
+                .lower()\
+                .replace('-', '')
+
+            normalized_surname = sub(RE_SPACES, '' ,normalized_surname)
+
+            if normalized_surname and '.' not in normalized_surname:
+                surnames.add(normalized_surname)
+                corrected_surnames[elem['fingerprint']] = surnames
+
+        ignore_reconciliation = set([])
+        for fgpt, count in corrected_surnames.items():
+            if len(corrected_surnames.get(fgpt)) > 1:
+                ignore_reconciliation.add(fgpt)
+
+        return ignore_reconciliation
+
+
+    def get_fingerprints_with_precedence_information(self):
+
+        fingerprint_frequencies_raw = self.db.query(
+            'SELECT fingerprint, COUNT(*) `count` FROM person '
+            'GROUP BY fingerprint ORDER BY `count` DESC;')
+
+        fingerprint_frequencies = {
+            e['fingerprint']: e['count']
+            for e in fingerprint_frequencies_raw}
+
+        fingerprint_id = self.db.query('SELECT fingerprint, id from person;')
+
+        fingerprint_min_id = {}
+        for element in fingerprint_id:
+            min_id_dict = fingerprint_min_id.get(element['fingerprint'], {})
+            min_id = min(min_id_dict.get('min_id', 99999999999999999), element['id'])
+            fingerprint_min_id[element['fingerprint']] = {'min_id': min_id}
+
+        for fingerprint, frequency in fingerprint_frequencies.iteritems():
+            fingerprint_min_id[fingerprint]['freq'] = frequency
+
+        return fingerprint_min_id
+
+    def get_document_information_in_db(self, doc_id, authors_precedence, ignore_author_reconciliation):
         """Iterates over all the documents SQLite database."""
 
         info = dict()
-        info['authors'] = self._get_normalised_authors(doc_id)
+        info['authors'] = self._get_normalised_authors(
+            doc_id,
+            authors_precedence,
+            ignore_author_reconciliation)
         info['date'] = self._get_earliest_dates(doc_id)
         info['title'] = self._get_full_title(doc_id)
 
         # If the same author has 2 entries, we keep only the more
         # descriptive:
         info['authors'] = self._reconcile_authors(info.get('authors'))
-        
-        # Computing age of the eldest author at the first publication date
-        if info.get('authors') and info.get('date'):
-            try:
-                eldest_author_birth_year = \
-                    int(
-                        sorted([y.get('birth', '99999')
-                                for y in info.get('authors').values()])[0])
-                pub_date = int(info.get('date'))
-                if 1 < eldest_author_birth_year < 2000 and pub_date:
-                    info['age_at_publication'] = pub_date - eldest_author_birth_year
-            except ValueError:
-                pass
+
 
         # Computing a score of meta-data information
         informativeness = self.dict_informativeness(info)
         normalized_score = round(1.0 - (1.0/(math.log(informativeness)+1.0)), 2)
         info['meta-data_comprehensiveness_score'] = normalized_score
+
         return info
 
     def _reconcile_authors(self, authors):
+        """ Reconciliates ambiguous authors names
+        For instance, Diderot D. and Diderot, Denis should be gathered.
+        """
 
         if authors and len(authors) > 1:
             keys_beginning = [k[0:4] for k in authors.keys()]
@@ -381,6 +486,7 @@ class CorpusSQLiteDBReader(object):
                 }
                 most_informative_key = dict_informativeness[max(dict_informativeness)]
                 author_keys = set([])
+
                 for k in authors.keys():
                     if k is not most_informative_key:
                         if authors[k].get('key'):
@@ -467,7 +573,8 @@ class CorpusSQLiteDBReader(object):
             earliest = '....'
         return earliest
 
-    def _get_normalised_authors(self, doc_id):
+    def _get_normalised_authors(self, doc_id, authors_precedence, to_ignore):
+
         doc_authors = [
             self.person_table.find_one(id=doc_has_author['author_id'])
             for doc_has_author
@@ -480,19 +587,45 @@ class CorpusSQLiteDBReader(object):
         fingerprint_info = {
             author.get('fingerprint'): {
                 'role':  author.get('role', 'N.C.'),
-                'alpha_key': author.get('fingerprint')
+                'alpha_key': author.get('fingerprint'),
+                'is_reconciliated': str(author.get('fingerprint') not in to_ignore)
             }
             for author in doc_authors
         }
+
         for fingerprint in fingerprint_info:
-            fingerprint_info[fingerprint].update(self._reconcile_fingerprints(fingerprint))
+
+            if fingerprint in to_ignore:
+                ambiguity = {doc_id: {}}
+                ambiguity[doc_id].update(self._get_original_author(doc_id, doc_authors, fingerprint))
+                fingerprint_info[fingerprint].update(ambiguity)
+            else:
+                fingerprint_info[fingerprint].update(self._reconcile_fingerprints(fingerprint))
+
             fingerprint_info[fingerprint] = {
-                k.strip(): v.strip()
+                k.strip(): v
                 for k, v
                 in fingerprint_info[fingerprint].items()
                 if v
             }
+
+            fingerprint_info[fingerprint]['min_id'] = \
+                authors_precedence.get(fingerprint).get('min_id')
+            fingerprint_info[fingerprint]['freq'] = \
+                authors_precedence.get(fingerprint).get('freq')
+
         return fingerprint_info
+
+    def _get_original_author(self, doc_id, doc_authors, fingerprint):
+
+        doc_author = [a for a in doc_authors if a['fingerprint'] == fingerprint]
+        ignore_info = ['id', 'role', 'fingerprint', 'type']
+        info = dict()
+        for (k, v) in doc_author[0].items():
+            if k in ignore_info or not v:
+                continue
+            info[k] = v.strip()
+        return info
 
     @lrudecorator(300)
     def _reconcile_fingerprints(self, fingerprint):
@@ -507,6 +640,6 @@ class CorpusSQLiteDBReader(object):
         for (k, v) in reconciled.items():
             if k in ignore_info or not v:
                 continue
-            info[k] = v
+            info[k] = v.strip()
         return info
 
