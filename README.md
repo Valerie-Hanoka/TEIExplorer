@@ -1,6 +1,6 @@
 ![TEIExplorer](https://github.com/Valerie-Hanoka/TEIExplorer/blob/master/illustration.png)
 
-An unfinished tool to explore and compare XML/TEI French Litterature Corpora
+An (dirty) unfinished tool to explore and compare XML/TEI French Litterature Corpora
 ========================================================================================
 
 *In development*
