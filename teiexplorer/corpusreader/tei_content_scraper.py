@@ -291,16 +291,18 @@ class TeiContent(DocumentContent):
     #  ADDING CONTENT TO TEI
     #########################
 
-    def add_to_header(self, info_dict):
+    def add_to_header(self, info_dict, file_suffix='_r'):
         """Add the XML representation of info_dict in the header of the current
          TEI Document"""
 
         metadata_root = self.etree_root.find(self.namespace + u'teiHeader')
-        additional_info_tag = etree.Element("obvilInfo")
+        additional_info_tag = etree.Element("xenoData")
         metadata_root.append(additional_info_tag)
         self.add_to_xml(info_dict, parent=additional_info_tag)
+        file_ext = self.filePath.rsplit('.')
+        new_filepath = "%s%s.%s" % (file_ext[0], file_suffix, file_ext[1])
         self.etree_xml.write(
-            self.filePath,
+            new_filepath,
             pretty_print=True,
             encoding="UTF-8",
             xml_declaration=False)

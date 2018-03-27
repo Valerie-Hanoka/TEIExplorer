@@ -92,10 +92,16 @@ def parse_person(value):
     if parsed:
         # Computing the author "fingerprint" which will be used to reconcile the authors
         first_name = parsed.get('first_name_or_initials', u'')
-        initials = get_name_initials(first_name) if len(first_name) > 0 else u''
-        parsed['fingerprint'] = u"%s%s" %(
-            filter(str.isalpha, str.lower(unidecode.unidecode(parsed.get('last_name', u'')))),
-            initials
+        first_name_initials = get_name_initials(first_name) if len(first_name) > 0 else u''
+        last_name = parsed.get('last_name', u'')
+        last_name_normalised = filter(
+            str.isalpha,
+            str.lower(unidecode.unidecode(last_name))
+        )
+
+        parsed['fingerprint'] = u"%s%s" % (
+            last_name_normalised,
+            first_name_initials
         )
     return parsed
 
