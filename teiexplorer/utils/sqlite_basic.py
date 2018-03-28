@@ -490,15 +490,16 @@ class CorpusSQLiteDBReader(object):
                         for k, d in authors.iteritems()
                         if k.startswith(duplicate_beginning)
                     }
-                    
-                    most_informative_key = dict_informativeness[max(dict_informativeness)]
-                    author_keys = set([])
 
-                    for k in authors.keys():
-                        if k is not most_informative_key:
-                            if authors[k].get('key'):
-                                author_keys.add(authors[k].get('key'))
-                            authors.pop(k)
+                    author_keys = set([])
+                    if dict_informativeness:
+                        most_informative_key = dict_informativeness[max(dict_informativeness)]
+
+                        for k in authors.keys():
+                            if k is not most_informative_key:
+                                if authors[k].get('key'):
+                                    author_keys.add(authors[k].get('key'))
+                                authors.pop(k)
 
                     for k in authors.keys():
                         if authors[k].get('key'):
