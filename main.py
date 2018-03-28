@@ -138,7 +138,7 @@ if __name__ == "__main__":
     # -- Modify corpus's TEI content -- #
     if options.amend_TEI:
         db = CorpusSQLiteDBReader(db_name)
-        db.treat_document(dewey_filepath='data/databases/dewey_corresp_utf8.tsv')
+        db.treat_document(modify_TEI=True, dewey_filepath='data/databases/dewey_corresp_utf8.tsv')
 
 
 
