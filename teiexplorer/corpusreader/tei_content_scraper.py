@@ -299,8 +299,8 @@ class TeiContent(DocumentContent):
         additional_info_tag = etree.Element("xenoData")
         metadata_root.append(additional_info_tag)
         self.add_to_xml(info_dict, parent=additional_info_tag)
-        file_ext = self.filePath.rsplit('.')
-        new_filepath = "%s%s.%s" % (file_ext[0], file_suffix, file_ext[1])
+        (name, sep, ext) = self.filePath.rpartition('.')
+        new_filepath = "%s%s.%s" % (name, file_suffix, ext)
         self.etree_xml.write(
             new_filepath,
             pretty_print=True,
