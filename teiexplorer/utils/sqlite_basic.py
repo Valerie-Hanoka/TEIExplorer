@@ -324,6 +324,8 @@ class CorpusSQLiteDBReader(object):
         for document in self.document_table:
 
             doc_id = document['_file']
+            logging.info("Treating doc %s \r" %doc_id)
+
             doc_info = self.get_document_information_in_db(
                 doc_id,
                 authors_precedence,
@@ -386,6 +388,8 @@ class CorpusSQLiteDBReader(object):
             if modify_TEI:
                 tei_content = tcscraper.TeiContent(doc_id, document['_tag'])
                 tei_content.add_to_header(doc_info)
+                logging.info("result is saved.")
+
 
 
     def compute_fingerprints_ambiguity(self):
@@ -477,26 +481,29 @@ class CorpusSQLiteDBReader(object):
                 for k in keys_beginning
                 if keys_beginning.count(k) > 1
             }
-            for duplicate_beginning in duplicates_beginning:
-                # Bold guess...
-                dict_informativeness = {
-                    self.dict_informativeness(d): k
-                    for k, d in authors.iteritems()
-                    if k.startswith(duplicate_beginning)
-                }
-                most_informative_key = dict_informativeness[max(dict_informativeness)]
-                author_keys = set([])
 
-                for k in authors.keys():
-                    if k is not most_informative_key:
+            if duplicates_beginning:
+                for duplicate_beginning in duplicates_beginning:
+                    # Bold guess...
+                    dict_informativeness = {
+                        self.dict_informativeness(d): k
+                        for k, d in authors.iteritems()
+                        if k.startswith(duplicate_beginning)
+                    }
+                    
+                    most_informative_key = dict_informativeness[max(dict_informativeness)]
+                    author_keys = set([])
+
+                    for k in authors.keys():
+                        if k is not most_informative_key:
+                            if authors[k].get('key'):
+                                author_keys.add(authors[k].get('key'))
+                            authors.pop(k)
+
+                    for k in authors.keys():
                         if authors[k].get('key'):
                             author_keys.add(authors[k].get('key'))
-                        authors.pop(k)
-
-                for k in authors.keys():
-                    if authors[k].get('key'):
-                        author_keys.add(authors[k].get('key'))
-                    authors[k]['key'] = u', '.join(author_keys)
+                        authors[k]['key'] = u', '.join(author_keys)
 
         return authors
 
