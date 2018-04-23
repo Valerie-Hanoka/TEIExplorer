@@ -8,7 +8,10 @@ from lxml import etree
 from nltk.stem.snowball import SnowballStemmer
 from textblob import TextBlob
 
-from teiexplorer.utils.utils import merge_two_dicts
+from teiexplorer.utils.utils import (
+    merge_two_dicts,
+    flatten_nested_dict_to_pairs
+)
 from teiexplorer.utils.lingutils import is_content_word
 
 
@@ -142,17 +145,26 @@ class TeiContent(DocumentContent):
             else u'%s#%s' % (parent_tag, element_tag)
 
         for child in elements_iterator:
-            if child.getchildren():
-                element_information = merge_two_dicts(
-                    self.__recursive_tag_info_retriever(element_tag, child),
-                    element_information
-                )
-            else:
-                if child.text:
-                    (normalized_text, normalized_tag) = self.__normalize_metadata(child.text, child.tag)
+            has_child = child.getchildren()
+            # The node is not a leaf
+            if has_child:
+                if 'rend=' not in child.attrib: # If the child element is only there for rendering
+                    has_child = False
                     element_information = merge_two_dicts(
-                        {u'%s#%s' % (element_tag, normalized_tag):
-                             (self._ATTR_CMPT, normalized_text)},
+                        self.__recursive_tag_info_retriever(element_tag, child),
+                        element_information
+                    )
+            # The node is a leaf
+            if not has_child:
+                if child.text:
+                    try:
+                        text = u''.join(child.itertext())
+                    except ValueError:
+                        text = child.text
+                    (normalized_text, normalized_tag) = self.__normalize_metadata(text, child.tag)
+
+                    element_information = merge_two_dicts(
+                        {u'%s#%s' % (element_tag, normalized_tag): (self._ATTR_CMPT, normalized_text)},
                         element_information
                     )
                     for attribute_key, attribute_value in child.attrib.items():
@@ -195,7 +207,7 @@ class TeiContent(DocumentContent):
         # "_sentences", "_chars", "_tokens", "_sent:polarity", "_sent:subjectivity"
         # ]
 
-        unwanted_keys = ['^note$', '^..?$', '^.*at 0x.*$', '^projectDesc.*$']
+        unwanted_keys = ['^note$', '^..?$', '^.*at 0x.*$', '^hi$', '^rend$']  # , '^projectDesc.*$']
         unwanted_values = ['^$', '^CONVERT-TARGET:.*$', 'ARTFL Frantext']
 
         unwanted_keys_re = re.compile(u'|'.join('(?:%s)' % p for p in unwanted_keys))
@@ -397,3 +409,96 @@ class TeiContent(DocumentContent):
                     for w in self.blob.tokens
                     if is_content_word(w)
                 ]
+
+
+    ######################################################
+    #                  EXPORTING DATA
+    ######################################################
+    def __header_to_omeka_dict(self):
+        """
+        Reformats (flattens+clean+regroup some elements) the header meta-data dict
+        and returns a dict that will be easy to transform into a csv line.
+        :return: A dict
+        """
+
+        flattened_header_metadata = [
+            (k, sorted(v))
+            for (k, v) in flatten_nested_dict_to_pairs(self.header_metadata)
+            if 'hi__#' not in k
+        ]
+
+        flattened_header_metadata = sorted(
+            flattened_header_metadata,
+            key=lambda x: x[1]
+        )
+
+        by_xpath = {}
+        for (key, value) in flattened_header_metadata:
+
+            match = re.match(r'^(?P<chunkA>[^_]*)__(?P<path>[^_]*)_(?P<chunkB>[^_]*)$', key)
+            if match:
+                path = match.groupdict().get("path")
+                chunkb = match.groupdict().get("chunkB")
+                elem = by_xpath.get(path, {})
+                if elem:
+                    elem.update({chunkb: value})
+                else:
+                    elem = {chunkb: value}
+                by_xpath[path] = elem
+
+        by_csv_column = {}
+        source = {}
+        for (path, value) in by_xpath.items():
+
+            # Finding and organizing Contributors
+            if 'respStmt' in path:
+                afnor_names = set([])
+                for name in value.get(u'name'):
+                    RE_NAME = r'(?P<first>[^\s]*)\s+(?P<last>.*)'
+                    match = re.match(RE_NAME, name[1])
+                    if match:
+                        afnor_name = u"%s, %s" % (match.groupdict().get('last'), match.groupdict().get('first'))
+                        afnor_names.add(afnor_name)
+                    else:
+                        logging.warning("Ignoring contributor '%s' (%s)" % (name[1], self.filePath))
+                by_csv_column[path] = u' ; '.join(afnor_names)
+
+            # Finding sources
+            elif '#fileDesc#sourceDesc' == path or path == '#fileDesc#sourceDesc#bibl_target':
+                for (index, info) in value.values().pop():
+                    source[index] = info
+            else:
+                for value_key in value.keys():
+                    new_path = u'%s%s' % (path, '' if value_key == 'p' else u'_%s' % value_key)
+                    # import ipdb; ipdb.set_trace()
+                    by_csv_column[new_path] = u' ; '.join([c[1] for c in by_xpath[path][value_key]])
+
+        # Organizing sources:
+        if source:
+            by_csv_column["dcterms:source"] = u' ; '.join([source[k] for k in sorted(source.keys(), reverse=True)])
+
+        return by_csv_column
+
+
+    def metadata_to_omeka_compliant_csv(self, headers=[]):
+        """
+        Returns the metadata in a format which can be read by
+        Omeka-s module "CSVImport".
+        :return: The udated CSV header, The metadata of the current document in CSV format
+        """
+
+        omeka_metadata = self.__header_to_omeka_dict()
+
+        # Check that the header is exhaustive
+        if headers:
+            missing = set(omeka_metadata.keys())-set(headers)
+            headers.extend(missing)
+        else:
+            headers = sorted(omeka_metadata.keys())
+
+        header_sorted_omeka_metadata = [omeka_metadata.get(h, None) for h in headers]
+
+        return headers, header_sorted_omeka_metadata
+
+
+
