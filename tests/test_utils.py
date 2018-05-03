@@ -10,7 +10,8 @@ from nose.tools import *
 
 from teiexplorer.utils.utils import(
     merge_two_dicts,
-    sum_dicts
+    sum_dicts,
+    flatten_nested_dict_to_pairs
 )
 
 def test_utils_merge_two_dicts1():
@@ -61,3 +62,14 @@ def test_utils_sum_dicts():
     }
 
     assert cmp(summed, truth) == 0
+
+
+def test_utils_flatten_nested_dict_to_pairs():
+    """
+    Flatten the path of a nested dict for all the dict values: Should pass
+    """
+    nested_dict = {'k1': {'ka' : 'v1', 'kb': {u'kα': 'v2'}}, 'k2': 'v3'}
+    flattened = flatten_nested_dict_to_pairs(nested_dict)
+    truth = [(u'k2', 'v3'), (u'k1_kb_kα', 'v2'), (u'k1_ka', 'v1')]
+
+    assert flattened == truth

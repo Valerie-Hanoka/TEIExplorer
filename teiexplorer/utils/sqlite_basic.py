@@ -8,16 +8,16 @@ Author: Valérie Hanoka
 
 import logging
 import dataset
-from utils import (
+from .utils import (
     merge_two_dicts
 )
-from lingutils import (
+from .lingutils import (
     normalize_str,
     parse_year_date,
     parse_person
 )
 
-from metadata import (
+from .metadata import (
     load_tsv_dewey
 )
 from copy import deepcopy
@@ -27,6 +27,9 @@ import math
 import unicodedata
 from re import compile, sub
 from teiexplorer.corpusreader import tei_content_scraper as tcscraper
+
+import csv
+import io
 
 
 
@@ -120,7 +123,7 @@ class CorpusSQLiteDBWriter(object):
         """Add the current document in the document_table"""
         ark_id_dict = doc.header_metadata.get('ark')
         if ark_id_dict:
-            _, ark_id = ark_id_dict.values().pop().get('ark')[0]
+            _, ark_id = list(ark_id_dict.values()).pop().get('ark')[0]
             doc.document_metadata['ark'] = ark_id
         return self.document_table.insert(doc.document_metadata)
         # TODO : Body parsing information
@@ -209,7 +212,7 @@ class CorpusSQLiteDBWriter(object):
         if not authors:
             return
 
-        if isinstance(authors, unicode):
+        if isinstance(authors, str):
             row_info.update(parse_person(row_info['author']))
             return row_info
 
@@ -650,4 +653,113 @@ class CorpusSQLiteDBReader(object):
                 continue
             info[k] = v.strip()
         return info
+
+
+    #######################################################
+    #                  EXPORTERS
+    #######################################################
+
+    def get_document_has_attribute(
+            self,
+            doc_id,
+            document_has_attribute_table,
+            document_attribute_id,
+            attribute_table,
+            attribute_name,
+            additional_attrs=[],
+            ):
+
+        attribute_info = set([])
+        for doc_has_attribute in document_has_attribute_table.find(document_id=doc_id):
+            attributes = attribute_table.find(id=doc_has_attribute.get(document_attribute_id))
+            for identifier in attributes:
+                attr = identifier.get(attribute_name)
+                attr = str(attr) if isinstance(attr, int) else attr
+                for add_attr in additional_attrs:
+                    a = identifier.get(add_attr)
+                    if a:
+                        a = str(a) if isinstance(a, int) else a
+                        attr = '%s (%s=%s)' %(attr, add_attr, a)
+                if not attr:
+                    attr = ''
+                attribute_info.add(normalize_str(attr))
+
+        return u'; '.join(attribute_info).encode('utf-8')
+
+    def export_to_csv(self, file, dewey_filepath=None):
+
+        attributes_names = {
+            u'identifier': {
+                u'document_has_attribute_table': self.document_has_idno_table,
+                u'document_attribute_id': u'idno_id',
+                u'attribute_table': self.idno_table,
+                u'attribute_name': u'idno',
+            },
+            u'dates': {
+                u'document_has_attribute_table': self.document_has_date_table,
+                u'document_attribute_id': u'date_id',
+                u'attribute_table': self.date_table,
+                u'attribute_name': u'deduced_date',
+            },
+            u'author': {
+                u'document_has_attribute_table': self.document_has_author_table ,
+                u'document_attribute_id': u'author_id',
+                u'attribute_table': self.person_table,
+                u'attribute_name': u'author',
+                u'additional_attrs': [u'key']
+            },
+            u'title': {
+                u'document_has_attribute_table': self.document_has_title_table,
+                u'document_attribute_id': u'title_id',
+                u'attribute_table': self.title_table,
+                u'attribute_name': u'title',
+                u'additional_attrs': [u'level']
+            },
+        }
+
+        if dewey_filepath:
+            deweys = load_tsv_dewey(dewey_filepath)
+
+        with open(file, 'wb') as f:
+
+
+
+            header = [u'doc_id', 'dewey'] if dewey_filepath else [u'doc_id']
+            header.extend(attributes_names.keys())
+            w = csv.DictWriter(f, fieldnames=header)
+
+            w.writeheader()
+            info_batch = []
+            info_batch_size = 0
+
+            for document in self.document_table:
+
+                info = {}
+                doc_id = document.get(u'_file')
+
+                # Getting the tables important content
+                for attribute_name, param_dict in attributes_names.items():
+                    attributes = self.get_document_has_attribute(doc_id=doc_id, **param_dict)
+                    info[attribute_name] = attributes
+                    info[u'doc_id'] = doc_id.rpartition('/')[2]
+
+                    # deweys
+                    if dewey_filepath:
+                        ark = document.get('ark')
+                        if ark:
+                            dewey_info = deweys.get(ark)
+                            if dewey_info:
+                                dewey_code = ' - '.join(deweys.get(document.get('ark')))
+                                info['dewey'] = normalize_str(dewey_code).encode('utf-8')
+
+                # saving the info in the CSV file
+                info_batch.append(info)
+                info_batch_size += 1
+
+                if info_batch_size == 100:
+                    w.writerows(info_batch)
+                    info_batch_size = 0
+                    info_batch = []
+
+            w.writerows(info_batch)
 

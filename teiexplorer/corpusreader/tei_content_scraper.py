@@ -3,13 +3,17 @@
 
 import logging
 import re
-from collections import Counter
 from lxml import etree
-from nltk.stem.snowball import SnowballStemmer
-from textblob import TextBlob
 
-from teiexplorer.utils.utils import merge_two_dicts
-from teiexplorer.utils.lingutils import is_content_word
+from teiexplorer.utils.utils import (
+    merge_two_dicts,
+    flatten_nested_dict_to_pairs
+)
+
+#from collections import Counter
+#from nltk.stem.snowball import SnowballStemmer
+#from textblob import TextBlob
+#from teiexplorer.utils.lingutils import is_content_word
 
 
 class DocumentContent(object):
@@ -46,8 +50,8 @@ class DocumentContent(object):
         self.stemming = stemming
 
         # Additional metadata
-        self.document_metadata[u'_file'] = unicode(document_filepath)
-        self.document_metadata[u'_tag'] = unicode(corpus_tag)
+        self.document_metadata[u'_file'] = u"%s" % document_filepath
+        self.document_metadata[u'_tag'] = u"%s" % corpus_tag
 
 
 class TeiContent(DocumentContent):
@@ -62,6 +66,9 @@ class TeiContent(DocumentContent):
 
     _ATTR_CMPT = 0
 
+    OMEKA_SPLIT_CHAR = u';'
+
+
     def __init__(self, document_filepath, corpus_tag, stemming=True, *args, **kwargs):
         """
         A generic TEI Parser which collects the header metadata of a file,
@@ -75,13 +82,12 @@ class TeiContent(DocumentContent):
 
         super(TeiContent, self).__init__(document_filepath, corpus_tag, stemming,  *args, **kwargs)
 
+
         self.__initialise_parser()
 
         if self.etree_xml:
             self.__parse_header()
             #self.__get_body_metrics()
-
-
 
     def __initialise_parser(self):
         """Initialization of the XML/TEI parser for current document
@@ -99,6 +105,9 @@ class TeiContent(DocumentContent):
             self.namespace = '{' + self.etree_xml.xpath('namespace-uri(.)') + '}'
         except etree.XMLSyntaxError:
             logging.error(u"Ignoring file %s - XMLSyntaxError" % self.filePath)
+        except AssertionError:
+            logging.error(u"Ignoring file %s - XMLSyntaxError" % self.filePath)
+            return
 
     ######################
     #      HEADERS
@@ -113,6 +122,9 @@ class TeiContent(DocumentContent):
 
         # Parsing the document header
         self.etree_root = self.etree_xml.getroot()
+        if self.etree_root is None:
+            return
+
         metadata_root = self.etree_root.find(self.namespace + u'teiHeader')
         self.header_metadata = merge_two_dicts(
             self.header_metadata,
@@ -142,17 +154,26 @@ class TeiContent(DocumentContent):
             else u'%s#%s' % (parent_tag, element_tag)
 
         for child in elements_iterator:
-            if child.getchildren():
-                element_information = merge_two_dicts(
-                    self.__recursive_tag_info_retriever(element_tag, child),
-                    element_information
-                )
-            else:
-                if child.text:
-                    (normalized_text, normalized_tag) = self.__normalize_metadata(child.text, child.tag)
+            has_child = child.getchildren()
+            # The node is not a leaf
+            if has_child:
+                if 'rend=' not in child.attrib: # If the child element is only there for rendering
+                    has_child = False
                     element_information = merge_two_dicts(
-                        {u'%s#%s' % (element_tag, normalized_tag):
-                             (self._ATTR_CMPT, normalized_text)},
+                        self.__recursive_tag_info_retriever(element_tag, child),
+                        element_information
+                    )
+            # The node is a leaf
+            if not has_child:
+                if child.text:
+                    try:
+                        text = u''.join(child.itertext())
+                    except ValueError:
+                        text = child.text
+                    (normalized_text, normalized_tag) = self.__normalize_metadata(text, child.tag)
+
+                    element_information = merge_two_dicts(
+                        {u'%s#%s' % (element_tag, normalized_tag): (self._ATTR_CMPT, normalized_text)},
                         element_information
                     )
                     for attribute_key, attribute_value in child.attrib.items():
@@ -174,8 +195,8 @@ class TeiContent(DocumentContent):
         :param value: unicode, cleaned value
         :param key: clean key version"""
         # Using unicode
-        value = unicode(value)
-        key = unicode(key)
+        value = u"%s" % value
+        key = u"%s" % key
 
         if key.startswith(self.namespace):
             key = key[len(self.namespace):]
@@ -195,7 +216,7 @@ class TeiContent(DocumentContent):
         # "_sentences", "_chars", "_tokens", "_sent:polarity", "_sent:subjectivity"
         # ]
 
-        unwanted_keys = ['^note$', '^..?$', '^.*at 0x.*$', '^projectDesc.*$']
+        unwanted_keys = ['^note$', '^..?$', '^.*at 0x.*$', '^hi$', '^rend$']  # , '^projectDesc.*$']
         unwanted_values = ['^$', '^CONVERT-TARGET:.*$', 'ARTFL Frantext']
 
         unwanted_keys_re = re.compile(u'|'.join('(?:%s)' % p for p in unwanted_keys))
@@ -286,7 +307,6 @@ class TeiContent(DocumentContent):
 
         self.header_metadata = new_dic
 
-
     #########################
     #  ADDING CONTENT TO TEI
     #########################
@@ -307,7 +327,6 @@ class TeiContent(DocumentContent):
             encoding="UTF-8",
             xml_declaration=False)
 
-
     def add_to_xml(self, info_dict, parent):
         """Add the XML representation of info_dict under the
          parent in  the current TEI Document"""
@@ -325,75 +344,168 @@ class TeiContent(DocumentContent):
             parent.append(new_sub_element)
         return parent
 
-
-
     ######################
     #   CONTENT METRICS
     ######################
-    def __get_body_metrics(self):
-        """Computes various metrics on the text body of the XML/TEI document:
-            • Number of characters
-            • Number of tokens
-            • Number of words
-            • Number of sentences
-            • A (not reliable) polarity score
-            • A (not reliable) subjectivity score
+    # def __get_body_metrics(self):
+    #     """Computes various metrics on the text body of the XML/TEI document:
+    #         • Number of characters
+    #         • Number of tokens
+    #         • Number of words
+    #         • Number of sentences
+    #         • A (not reliable) polarity score
+    #         • A (not reliable) subjectivity score
+    #     """
+    #
+    #     tag = ".//%sbody" % self.namespace
+    #     bodies = self.etree_xml.find(tag)
+    #     if bodies is None or not bodies.keys(): # TODO not parsed at all
+    #         self.document_metadata[u'_body_parsed'] = False
+    #         logging.debug("File %s body is ill-formed. Not Parsing it." % self.filePath)
+    #         return
+    #
+    #     for body in bodies:
+    #         text_pieces = [t for t in body.itertext()]
+    #         self.blob = TextBlob(' '.join(text_pieces))
+    #         self.__initialise_content_words()
+    #         self.body_metadata[u"_chars"] = len(self.blob)
+    #         self.body_metadata[u"_words"] = len(self.blob.words)
+    #         self.body_metadata[u"_sentences"] = len(self.blob.sentences)
+    #         self.body_metadata[u"_sent:polarity"] = \
+    #             round(self.blob.sentiment.polarity, 3)  # within [-1, 1]
+    #         self.body_metadata[u"_sent:subjectivity"] = \
+    #             round(self.blob.sentiment.subjectivity, 3)  # [0=很objective, 1=很subjective]
+    #         self.document_metadata[u'_body_parsed'] = True
+    #         try:
+    #             self.body_metadata[u"_tokens"] = len(self.blob.tokens)
+    #         except LookupError:
+    #             import nltk
+    #             nltk.download('punkt')
+    #             self.body_metadata[u"_tokens"] = len(self.blob.tokens)
+    #
+    # def get_text_content_word_count(self):
+    #     """Gets the word counts of words in the text that are not in the stopword list
+    #     :return: """
+    #     if self.blob:
+    #         return Counter(self.content_words)
+    #     else:
+    #         logging.debug(u"%s won't be taken into account " % self.filePath)
+    #         return {}
+    #
+    # def __initialise_content_words(self):
+    #     """
+    #     TODO - proper normalisation
+    #     Returns a list of normalized content words (no punctuation)
+    #     normalized here means just lower case + stemmed if the option
+    #     is enabled.
+    #     :return: A list of normalized content words."""
+    #     if self.blob:
+    #
+    #         if self.stemming:
+    #             stemmer = SnowballStemmer("french")
+    #             self.content_words = [
+    #                 u"%s" % stemmer.stem(w.lower())
+    #                 for w in self.blob.tokens
+    #                 if is_content_word(w)
+    #             ]
+    #         else:
+    #             self.content_words = [
+    #                 u"%s" % w.lower()
+    #                 for w in self.blob.tokens
+    #                 if is_content_word(w)
+    #             ]
+
+
+    ######################################################
+    #                  EXPORTING DATA
+    ######################################################
+    def header_to_omeka_dict(self):
+        """
+        Reformats (flattens+clean+regroup some elements) the header meta-data dict
+        and returns a dict that will be easy to transform into a csv line.
+        :return: A dict
         """
 
-        tag = ".//%sbody" % self.namespace
-        bodies = self.etree_xml.find(tag)
-        if bodies is None or not bodies.keys(): # TODO not parsed at all
-            self.document_metadata[u'_body_parsed'] = False
-            logging.debug("File %s body is ill-formed. Not Parsing it." % self.filePath)
-            return
+        flattened_header_metadata = [
+            (k, sorted(v))
+            for (k, v) in flatten_nested_dict_to_pairs(self.header_metadata)
+            if 'hi__#' not in k
+        ]
 
-        for body in bodies:
-            text_pieces = [t for t in body.itertext()]
-            self.blob = TextBlob(' '.join(text_pieces))
-            self.__initialise_content_words()
-            self.body_metadata[u"_chars"] = len(self.blob)
-            self.body_metadata[u"_words"] = len(self.blob.words)
-            self.body_metadata[u"_sentences"] = len(self.blob.sentences)
-            self.body_metadata[u"_sent:polarity"] = \
-                round(self.blob.sentiment.polarity, 3)  # within [-1, 1]
-            self.body_metadata[u"_sent:subjectivity"] = \
-                round(self.blob.sentiment.subjectivity, 3)  # [0=很objective, 1=很subjective]
-            self.document_metadata[u'_body_parsed'] = True
-            try:
-                self.body_metadata[u"_tokens"] = len(self.blob.tokens)
-            except LookupError:
-                import nltk
-                nltk.download('punkt')
-                self.body_metadata[u"_tokens"] = len(self.blob.tokens)
+        flattened_header_metadata = sorted(
+            flattened_header_metadata,
+            key=lambda x: x[1]
+        )
 
-    def get_text_content_word_count(self):
-        """Gets the word counts of words in the text that are not in the stopword list
-        :return: """
-        if self.blob:
-            return Counter(self.content_words)
-        else:
-            logging.debug(u"%s won't be taken into account " % self.filePath)
-            return {}
+        by_xpath = {}
+        for (key, value) in flattened_header_metadata:
 
-    def __initialise_content_words(self):
-        """
-        TODO - proper normalisation
-        Returns a list of normalized content words (no punctuation)
-        normalized here means just lower case + stemmed if the option
-        is enabled.
-        :return: A list of normalized content words."""
-        if self.blob:
+            match = re.match(r'^(?P<chunkA>[^_]*)__(?P<path>[^_]*)_(?P<chunkB>[^_]*)$', key)
+            if match:
+                path = match.groupdict().get("path")
+                chunkb = match.groupdict().get("chunkB") \
+                    if match.groupdict().get("chunkB") == match.groupdict().get("chunkA") \
+                    else "%s_%s" %(match.groupdict().get("chunkA"), match.groupdict().get("chunkB"))
+                elem = by_xpath.get(path, {})
+                if elem:
+                    elem.update({chunkb: value})
+                else:
+                    elem = {chunkb: value}
+                by_xpath[path] = elem
 
-            if self.stemming:
-                stemmer = SnowballStemmer("french")
-                self.content_words = [
-                    unicode(stemmer.stem(w.lower()))
-                    for w in self.blob.tokens
-                    if is_content_word(w)
-                ]
+        by_csv_column = {}
+        source = {}
+        for (path, value) in by_xpath.items():
+
+            # Finding and organizing Contributors
+            if 'respStmt' in path:
+                afnor_names = set([])
+                for name in value.get(u'name', []):
+                    RE_NAME = r'(?P<first>[^\s]*)\s+(?P<last>.*)'
+                    match = re.match(RE_NAME, name[1])
+                    if match:
+                        afnor_name = u"%s, %s" % (match.groupdict().get('last'), match.groupdict().get('first'))
+                        afnor_names.add(afnor_name)
+                    else:
+                        logging.warning("Ignoring contributor '%s' (%s)" % (name[1], self.filePath))
+                by_csv_column[path] = self.OMEKA_SPLIT_CHAR.join(afnor_names)
+
+
+            # Finding sources
+            elif '#fileDesc#sourceDesc' == path or path == '#fileDesc#sourceDesc#bibl_target':
+                for (index, info) in list(value.values()).pop():
+                    source[index] = info
             else:
-                self.content_words = [
-                    unicode(w.lower())
-                    for w in self.blob.tokens
-                    if is_content_word(w)
-                ]
+                for value_key in value.keys():
+                    new_path = u'%s%s' % (path, '' if value_key == 'p' else u'_%s' % value_key)
+                    by_csv_column[new_path] = self.OMEKA_SPLIT_CHAR.join([c[1] for c in by_xpath[path][value_key]])
+
+        # Organizing sources:
+        if source:
+            by_csv_column["dcterms:source"] = self.OMEKA_SPLIT_CHAR.join([source[k] for k in sorted(source.keys(), reverse=True)])
+
+        return by_csv_column
+
+
+    # def metadata_to_omeka_compliant_csv(self, headers=[]):
+    #     """
+    #     Returns the metadata in a format which can be read by
+    #     Omeka-s module "CSVImport".
+    #     :return: The updated CSV header, The metadata of the current document in CSV format
+    #     """
+    #
+    #     omeka_metadata = self.__header_to_omeka_dict()
+    #
+    #     # Check that the header is exhaustive
+    #     if headers:
+    #         missing = set(omeka_metadata.keys())-set(headers)
+    #         headers.extend(missing)
+    #     else:
+    #         headers = sorted(omeka_metadata.keys())
+    #
+    #     header_sorted_omeka_metadata = [omeka_metadata.get(h, None) for h in headers]
+    #
+    #     return headers, header_sorted_omeka_metadata
+
+
+

@@ -18,9 +18,9 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 When exploring a corpus of documents XML/TEI, one may need to
 know what texts are similar, and on what basis.
-This package intend to become a suite for text comparison.
+This package intend to become a suite for XML-TEI encoded text comparison.
 It will allow to:
-    - Read and store metadata information of each XML/TEI document
+    - Read, reconcile and store metadata information of each XML/TEI document
       e.g. :
          • Header metadata: Title, Author(s),...
          • Body metrics: #words, #sentences, polarity, ...
@@ -32,11 +32,13 @@ See http://obvil.paris-sorbonne.fr/
 For the moment, it is dirty and can't be used. Sorry.
 """
 
+import os
 import sys
 import glob
 import logging
 import time
 import json
+import unicodecsv
 from optparse import OptionParser
 from teiexplorer.corpusreader import tei_content_scraper as tcscraper
 from teiexplorer.utils.sqlite_basic import (
@@ -44,25 +46,67 @@ from teiexplorer.utils.sqlite_basic import (
     CorpusSQLiteDBReader
 )
 
-
 # import metadataGraph as mdg
-
 
 logging.basicConfig(
     format='%(asctime)s : %(levelname)s : %(message)s',
     level=logging.INFO)
 
 
-def parse_tei_documents(corpora, database):
+def tei_to_omeka_header(header):
+    """ Transforms an XML-TEI header path to a Omeka-s (semantic-web compliant) header."""
+
+
+    # XML-TEI headers elements to Linked Data correspondences
+    xml_tag_to_voc = {
+        u"#fileDesc#titleStmt_title": u"dcterms:title",
+        u"#fileDesc#titleStmt_author_key": u"dcterms:creator",
+        u"#fileDesc#titleStmt_author": u"dcterms:creator",
+        u"#fileDesc#editionStmt#respStmt": u"dcterms:contributor",
+        u"#fileDesc#publicationStmt_publisher": u"dcterms:publisher",
+        u"#profileDesc#creation_when": u"dcterms:date",
+        u"#profileDesc#langUsage_ident": u"dcterms:language",
+        u"#fileDesc#publicationStmt_idno": u"dcterms:identifier",  # Obligatoire
+        u"#fileDesc#titleStmt_editor_key": u"http://schema.org/editor",
+        #u"#fileDesc#titleStmt_editor": u"http://schema.org/editor",
+        u'#fileDesc#publicationStmt#availability#licence': u"dcterms:rights",
+        u"#fileDesc#publicationStmt#availability#licence_": u"dcterms:rights",
+        u"#fileDesc#publicationStmt#licence": u"dcterms:rights",
+    }
+
+    if xml_tag_to_voc.get(header, None):
+        return xml_tag_to_voc.get(header, header)
+
+    if u'#fileDesc#editionStmt#respStmt_' in header:
+        return u"dcterms:contributor"
+
+    return header
+
+def parse_tei_documents(corpora, database=None, omeka_csv_folder=None):
     """
     Extracting metadata from all the documents in corpora.
     Optionally saving this information in a SQLite database.
     :param corpora: Corpora locations where TEI files are stored
-    :param database: The database where tmetadata should be stored. If none, no storage.
+    :param database: The database where the metadata should be stored. If none, no storage.
+    :param csv_file: The file where the transformed metadata information in
+                     Omeka-s CSVimport format should be written.
     :return:
     """
+
+    if omeka_csv_folder:
+
+        # Creating the folder if it does not exists
+        if not os.path.exists(omeka_csv_folder):
+            os.makedirs(omeka_csv_folder)
+
+
+
     # The 'corpus_tag' corresponds to a label giving a hint on the corpus provenance.
     for (corpus_tag, corpus_location) in corpora.items():
+
+        csv_header_info = []
+        csv_matadata_list = []
+
         test_limit = 0
         for document_file in glob.glob(corpus_location):
             if debug_size and test_limit >= debug_size:
@@ -80,17 +124,35 @@ def parse_tei_documents(corpora, database):
             if database:
                 database.add_xml_document(document)
 
+            if omeka_csv_folder:
+                csv_header_info, csv_metadata = document.metadata_to_omeka_compliant_csv(csv_header_info)
+                csv_metadata.insert(0, "text/xml")
+                csv_matadata_list.append(csv_metadata)
             del document
+
+        if omeka_csv_folder:
+            csv_file = u'%s/%s.csv' % (omeka_csv_folder, corpus_tag)
+            csv_f = open(csv_file, 'wb')
+            csv_writer = unicodecsv.writer(csv_f, encoding='utf-8')
+            csv_header_info = [tei_to_omeka_header(h) for h in csv_header_info]
+            csv_header_info.insert(0, u"dcterms:format")
+            csv_writer.writerow(csv_header_info)
+            csv_writer.writerows(csv_matadata_list)
+            csv_f.close()
 
 
 if __name__ == "__main__":
 
     usage = """usage: ./%prog [--parse]
     • parse TEI documents and save result in DB useAndReuse.db: 
-      python main.py -c configs/config.json -p -s -d metadata.db
+      python3 main.py -c configs/config.json -p -s -d metadata.db
     • use a previously computed metadata DB metadata.db to save the transformed
       metadata information in the header of a new document:
-      python main.py -c configs/config.json -a -d useAndReuse.db
+      python3 main.py -c configs/config.json -a -d metadata.db
+    • Save a simplified version of the Metadata DB to a CSV file:
+      python3 main.py -d metadata.db [-y path/to/dewey/corresp/file.tsv] -v newCSVsimplifiedDB.csv
+    • Export all the corpus to Omeka via CSV file
+      python3 main.py  -c configs/config_omeka.json -p -o omeka
 
     """
     parser = OptionParser(usage)
@@ -111,11 +173,27 @@ if __name__ == "__main__":
                       default=False,
                       help="Saves the corpus info in a database.")
 
+    parser.add_option("-v", "--saveDatabaseToCSVFile",
+                      dest="db_csv_file",
+                      default=False,
+                      help="Saves the main database information in a CSV format.")
+
     parser.add_option("-a", "--amendTEIdocument",
                       action="store_true",
                       dest="amend_TEI",
                       default=False,
                       help="Saves the transformed metadata information in the TEI header.")
+
+    parser.add_option("-o", "--omekaCSVImportFolder",
+                      dest="omeka_csv_folder",
+                      default=False,
+                      help="Name of the folder in which the file where the transformed metadata information in "
+                           "an Omeka-s CSVimport format should be written.")
+
+    parser.add_option("-y", "--deweyFilePath",
+                      dest="dewey_filepath",
+                      default=False,
+                      help="Name of the Dewey/Document-ark correspondences file path.")
 
     (options, args) = parser.parse_args()
 
@@ -130,73 +208,22 @@ if __name__ == "__main__":
     if options.database:
         db_name = options.database
 
-    # -- Parse the corpus and optionally save it -- #
+    # -- Parse the corpus and optionally save it (in DB of Omeka CSV mass import format-- #
     if options.parse_tei:
         db = CorpusSQLiteDBWriter(db_name) if options.save_to_database else None
-        parse_tei_documents(corpora, db)
+        parse_tei_documents(corpora, database=db, omeka_csv_folder=options.omeka_csv_folder)
 
     # -- Modify corpus's TEI content -- #
-    if options.amend_TEI:
+    if options.amend_TEI and options.database:
         db = CorpusSQLiteDBReader(db_name)
-        db.treat_document(modify_TEI=True, dewey_filepath='data/databases/dewey_corresp_utf8.tsv')
+        db.treat_document(modify_TEI=False, dewey_filepath=options.dewey_filepath)
 
-
-
-    # # save_to_format(corpus.get_metadata_list(), options.output_filename, options.format)
-    # corpus.cluster(options.output_filename)
-    #
-    # clusters_info = corpus.clustering_result
-    # for cluster_id in clusters_info.keys():
-    #     save_to_format(
-    #         corpus.clustering_result[cluster_id],
-    #         "%s_cluster_%i" % (options.output_filename, cluster_id), "json")
-
-    # Building objects to keep all information about metadata. Put that before the rest.
-    # corpus = CorpusComparer()
+    # -- Export the main information of the DB in CSV format
+    if options.db_csv_file and options.database:
+        db = CorpusSQLiteDBReader(db_name)
+        db.export_to_csv(options.db_csv_file, dewey_filepath=options.dewey_filepath)
 
     sys.exit()
 
 
 
-
-
-
-
-
-
-##########################################
-#     Temporary: Saving Results          #
-##########################################
-# def save_to_json(data, json_output_filename):
-#     """Saves a Python data structure in a JSON file output_filename.
-#     :param data:
-#     :param json_output_filename:
-#     """
-#     with codecs.open(json_output_filename, 'w', encoding="utf-8") as file:
-#         json.dump(data, file, ensure_ascii=False)
-#         # import ipdb; ipdb.set_trace()
-#         logging.info(u"Dumped in %s" % json_output_filename)
-#
-#
-# def save_to_format(data, output_filename, file_format):
-#     """This function saves the current data
-#     in the specified file_format usinf the file name output_filname.
-#     If the file_format is not specified or not supported, the data is
-#     saved in a json format.
-#     :param data:
-#     :param output_filename:
-#     :param file_format:
-#     """
-#     output_filename = output_filename if output_filename else "output_"+time.strftime('%a_%H_%M')
-#     file_format = file_format if file_format else ""
-#     result_file = output_filename + "." + file_format
-#
-#     if file_format == 'json':
-#         save_to_json(data, 'data/results/%s' % result_file)
-#         logging.info(u"Saved in %s" % result_file)
-#     else:
-#         save_to_json(data, 'data/results/%s' % result_file + "json")
-#         logging.info(u"Saved in %sjson" % result_file)
-
-
-sum([20,14,14,13,13,13,13,12,12,12,11,11,11,10,10,10,10,9,9,9,9,9,9,9,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6])

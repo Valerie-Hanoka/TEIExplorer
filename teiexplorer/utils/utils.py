@@ -24,7 +24,7 @@ def merge_two_dicts(x, y):
     if not isinstance(y, dict):
         return y
     result = deepcopy(x)
-    for k, v in y.iteritems():
+    for k, v in y.items():
         if k in result and isinstance(result[k], dict):
                 result[k] = merge_two_dicts(result[k], v)
         else:
@@ -58,3 +58,29 @@ def sum_dicts(*dicts):
         for k, v in d.items():
             summed[k] += v
     return dict(summed)
+
+
+def flatten_nested_dict_to_pairs(nested_dict):
+    """
+    Given a nested dict of arbitrary depth, this function returns a
+    list of pairs (nested_key, final value).
+
+    :Example:
+    >>> nested_dict = {'k1': {'ka' : 'v1', 'kb': {'kα': 'v2'}}, 'k2': 'v3'}
+    >>> flatten_nested_dict_to_pairs(nested_dict)
+    >>> [('k2','v3'), ('k1_kb_kα','v2'), ('k1_ka', 'v1')]
+    :param nested_dict: A dictionary
+    :return:
+    """
+    pairs = []
+    for key, value in nested_dict.items():
+        if isinstance(value, dict):
+            nested_pairs = flatten_nested_dict_to_pairs(value)
+            for nested_pair in nested_pairs:
+                k, v = nested_pair
+                pairs.append((u'%s_%s' % (key, k), v))
+        else:
+            pairs.append((u'%s' % key,  value))
+                
+    return pairs
+
