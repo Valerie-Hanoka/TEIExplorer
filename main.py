@@ -52,6 +52,36 @@ logging.basicConfig(
     format='%(asctime)s : %(levelname)s : %(message)s',
     level=logging.INFO)
 
+
+def tei_to_omeka_header(header):
+    """ Transforms an XML-TEI header path to a Omeka-s (semantic-web compliant) header."""
+
+
+    # XML-TEI headers elements to Linked Data correspondences
+    xml_tag_to_voc = {
+        u"#fileDesc#titleStmt_title": u"dcterms:title",
+        u"#fileDesc#titleStmt_author_key": u"dcterms:creator",
+        u"#fileDesc#titleStmt_author": u"dcterms:creator",
+        u"#fileDesc#editionStmt#respStmt": u"dcterms:contributor",
+        u"#fileDesc#publicationStmt_publisher": u"dcterms:publisher",
+        u"#profileDesc#creation_when": u"dcterms:date",
+        u"#profileDesc#langUsage_ident": u"dcterms:language",
+        u"#fileDesc#publicationStmt_idno": u"dcterms:identifier",  # Obligatoire
+        u"#fileDesc#titleStmt_editor_key": u"http://schema.org/editor",
+        #u"#fileDesc#titleStmt_editor": u"http://schema.org/editor",
+        u'#fileDesc#publicationStmt#availability#licence': u"dcterms:rights",
+        u"#fileDesc#publicationStmt#availability#licence_": u"dcterms:rights",
+        u"#fileDesc#publicationStmt#licence": u"dcterms:rights",
+    }
+
+    if xml_tag_to_voc.get(header, None):
+        return xml_tag_to_voc.get(header, header)
+
+    if u'#fileDesc#editionStmt#respStmt_' in header:
+        return u"dcterms:contributor"
+
+    return header
+
 def parse_tei_documents(corpora, database=None, omeka_csv_folder=None):
     """
     Extracting metadata from all the documents in corpora.
@@ -69,26 +99,14 @@ def parse_tei_documents(corpora, database=None, omeka_csv_folder=None):
         if not os.path.exists(omeka_csv_folder):
             os.makedirs(omeka_csv_folder)
 
-        csv_header_info = []
-        csv_matadata_dict = {}
 
-        # XML-TEI headers elements to Linked Data correspondences
-        xml_tag_to_voc = {
-            u"#fileDesc#titleStmt_title": u"dcterms:title",
-            u"#fileDesc#titleStmt_key": u"dcterms:creator",
-            u"#fileDesc#editionStmt#respStmt": u"dcterms:contributor",
-            u"#fileDesc#publicationStmt_publisher": u"dcterms:publisher",
-            u"#profileDesc#creation_when": u"dcterms:date",
-            u"#profileDesc#langUsage_ident": u"dcterms:language",
-            u"#fileDesc#editionStmt_edition": u"dcterms:language",
-            u"#fileDesc#publicationStmt_idno": u"dcterms:identifier",  # Obligatoire
-            u"#fileDesc#titleStmt_editor": u"http://schema.org/editor",
-            u"#fileDesc#publicationStmt#availability#licence_": u"dcterms:rights",
-            u"#fileDesc#publicationStmt#licence": u"dcterms:rights",
-        }
 
     # The 'corpus_tag' corresponds to a label giving a hint on the corpus provenance.
     for (corpus_tag, corpus_location) in corpora.items():
+
+        csv_header_info = []
+        csv_matadata_list = []
+
         test_limit = 0
         for document_file in glob.glob(corpus_location):
             if debug_size and test_limit >= debug_size:
@@ -109,22 +127,17 @@ def parse_tei_documents(corpora, database=None, omeka_csv_folder=None):
             if omeka_csv_folder:
                 csv_header_info, csv_metadata = document.metadata_to_omeka_compliant_csv(csv_header_info)
                 csv_metadata.insert(0, "text/xml")
-                if csv_matadata_dict.get(corpus_tag, None):
-                    csv_matadata_dict[corpus_tag].append(csv_metadata)
-                else:
-                    csv_matadata_dict[corpus_tag] = [csv_metadata]
+                csv_matadata_list.append(csv_metadata)
             del document
 
-    if omeka_csv_folder:
-
-        for collection in csv_matadata_dict.keys():
-            csv_file = u'%s/%s.csv' %(omeka_csv_folder, collection)
+        if omeka_csv_folder:
+            csv_file = u'%s/%s.csv' % (omeka_csv_folder, corpus_tag)
             csv_f = open(csv_file, 'wb')
             csv_writer = unicodecsv.writer(csv_f, encoding='utf-8')
-            csv_header_info = [xml_tag_to_voc.get(h) if xml_tag_to_voc.get(h, None) else h for h in csv_header_info]
+            csv_header_info = [tei_to_omeka_header(h) for h in csv_header_info]
             csv_header_info.insert(0, u"dcterms:format")
             csv_writer.writerow(csv_header_info)
-            csv_writer.writerows(csv_matadata_dict.get(collection))
+            csv_writer.writerows(csv_matadata_list)
             csv_f.close()
 
 
@@ -132,12 +145,14 @@ if __name__ == "__main__":
 
     usage = """usage: ./%prog [--parse]
     • parse TEI documents and save result in DB useAndReuse.db: 
-      python main.py -c configs/config.json -p -s -d metadata.db
+      python3 main.py -c configs/config.json -p -s -d metadata.db
     • use a previously computed metadata DB metadata.db to save the transformed
       metadata information in the header of a new document:
-      python main.py -c configs/config.json -a -d metadata.db
+      python3 main.py -c configs/config.json -a -d metadata.db
     • Save a simplified version of the Metadata DB to a CSV file:
-      python main.py -d metadata.db [-y path/to/dewey/corresp/file.tsv] -v newCSVsimplifiedDB.csv
+      python3 main.py -d metadata.db [-y path/to/dewey/corresp/file.tsv] -v newCSVsimplifiedDB.csv
+    • Export all the corpus to Omeka via CSV file
+      python3 main.py  -c configs/config_omeka.json -p -o omeka
 
     """
     parser = OptionParser(usage)

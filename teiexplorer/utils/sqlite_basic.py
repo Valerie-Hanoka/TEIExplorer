@@ -8,16 +8,16 @@ Author: Valérie Hanoka
 
 import logging
 import dataset
-from utils import (
+from .utils import (
     merge_two_dicts
 )
-from lingutils import (
+from .lingutils import (
     normalize_str,
     parse_year_date,
     parse_person
 )
 
-from metadata import (
+from .metadata import (
     load_tsv_dewey
 )
 from copy import deepcopy
@@ -123,7 +123,7 @@ class CorpusSQLiteDBWriter(object):
         """Add the current document in the document_table"""
         ark_id_dict = doc.header_metadata.get('ark')
         if ark_id_dict:
-            _, ark_id = ark_id_dict.values().pop().get('ark')[0]
+            _, ark_id = list(ark_id_dict.values()).pop().get('ark')[0]
             doc.document_metadata['ark'] = ark_id
         return self.document_table.insert(doc.document_metadata)
         # TODO : Body parsing information
@@ -212,7 +212,7 @@ class CorpusSQLiteDBWriter(object):
         if not authors:
             return
 
-        if isinstance(authors, unicode):
+        if isinstance(authors, str):
             row_info.update(parse_person(row_info['author']))
             return row_info
 
@@ -722,6 +722,8 @@ class CorpusSQLiteDBReader(object):
 
         with open(file, 'wb') as f:
 
+
+
             header = [u'doc_id', 'dewey'] if dewey_filepath else [u'doc_id']
             header.extend(attributes_names.keys())
             w = csv.DictWriter(f, fieldnames=header)
@@ -731,8 +733,6 @@ class CorpusSQLiteDBReader(object):
             info_batch_size = 0
 
             for document in self.document_table:
-                if not document.get(u'_tag') == 'TGB':
-                    continue
 
                 info = {}
                 doc_id = document.get(u'_file')
@@ -757,10 +757,9 @@ class CorpusSQLiteDBReader(object):
                 info_batch_size += 1
 
                 if info_batch_size == 100:
-                    print doc_id
                     w.writerows(info_batch)
                     info_batch_size = 0
                     info_batch = []
 
-            w.writerows(info_batch_size)
+            w.writerows(info_batch)
 

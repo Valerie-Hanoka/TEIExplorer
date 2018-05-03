@@ -24,7 +24,7 @@ def merge_two_dicts(x, y):
     if not isinstance(y, dict):
         return y
     result = deepcopy(x)
-    for k, v in y.iteritems():
+    for k, v in y.items():
         if k in result and isinstance(result[k], dict):
                 result[k] = merge_two_dicts(result[k], v)
         else:
