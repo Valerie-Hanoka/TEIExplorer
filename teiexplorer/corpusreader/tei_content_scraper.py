@@ -329,7 +329,7 @@ class TeiContent(DocumentContent):
 
     def add_to_xml(self, info_dict, parent):
         """Add the XML representation of info_dict under the
-         parent in  the current TEI Document"""
+         parent in the current TEI Document"""
 
         for info_key, info_value in info_dict.iteritems():
             new_sub_element = etree.Element(info_key)
