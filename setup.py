@@ -11,7 +11,7 @@ class Install(_install):
         #nltk.download("punkt")
 
 setup(
-    name='teixplorer',
+    name='teiexplorer',
     version='0.1',
     description='A toy toy to toy around with XML/TEI corpora',
     url='',

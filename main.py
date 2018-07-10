@@ -27,9 +27,7 @@ It will allow to:
     - Run an unsupervised comparing tool for a set of texts (To be done).
 
 This tool is being developed as part of the OBVIL projects.
-See http://obvil.paris-sorbonne.fr/
 
-For the moment, it is dirty and can't be used. Sorry.
 """
 
 import os
@@ -66,9 +64,8 @@ def tei_to_omeka_header(header):
         u"#fileDesc#publicationStmt_publisher": u"dcterms:publisher",
         u"#profileDesc#creation_when": u"dcterms:date",
         u"#profileDesc#langUsage_ident": u"dcterms:language",
-        u"#fileDesc#publicationStmt_idno": u"dcterms:identifier",  # Obligatoire
+        u"#fileDesc#publicationStmt_idno": u"dcterms:identifier",  # Mandatory for Gallica
         u"#fileDesc#titleStmt_editor_key": u"http://schema.org/editor",
-        #u"#fileDesc#titleStmt_editor": u"http://schema.org/editor",
         u'#fileDesc#publicationStmt#availability#licence': u"dcterms:rights",
         u"#fileDesc#publicationStmt#availability#licence_": u"dcterms:rights",
         u"#fileDesc#publicationStmt#licence": u"dcterms:rights",
@@ -144,12 +141,12 @@ def parse_tei_documents(corpora, database=None, omeka_csv_folder=None):
 if __name__ == "__main__":
 
     usage = """usage: ./%prog [--parse]
-    • parse TEI documents and save result in DB useAndReuse.db: 
+    • parse TEI documents and save result in DB metadata.db: 
       python3 main.py -c configs/config.json -p -s -d metadata.db
     • use a previously computed metadata DB metadata.db to save the transformed
       metadata information in the header of a new document:
       python3 main.py -c configs/config.json -a -d metadata.db
-    • Save a simplified version of the Metadata DB to a CSV file:
+    • Save a simplified version of the metadata DB to a CSV file:
       python3 main.py -d metadata.db [-y path/to/dewey/corresp/file.tsv] -v newCSVsimplifiedDB.csv
     • Export all the corpus to Omeka via CSV file
       python3 main.py  -c configs/config_omeka.json -p -o omeka
@@ -224,6 +221,3 @@ if __name__ == "__main__":
         db.export_to_csv(options.db_csv_file, dewey_filepath=options.dewey_filepath)
 
     sys.exit()
-
-
-
